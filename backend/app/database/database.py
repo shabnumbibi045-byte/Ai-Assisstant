@@ -44,3 +44,13 @@ class DatabaseManager:
         """Close database connections."""
         await self.engine.dispose()
         logger.info("Database connections closed")
+
+
+# Global database manager instance
+db_manager = DatabaseManager()
+
+
+async def get_db_session() -> AsyncSession:
+    """Dependency for getting database session."""
+    async with db_manager.async_session_maker() as session:
+        yield session

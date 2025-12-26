@@ -99,6 +99,29 @@ async def get_current_active_user(
     return current_user
 
 
+async def get_current_verified_user(
+    current_user: User = Depends(get_current_active_user)
+) -> User:
+    """
+    Get current verified user (active and email verified).
+    
+    Args:
+        current_user: Current active user
+        
+    Returns:
+        Verified user object
+        
+    Raises:
+        HTTPException: If user is not verified
+    """
+    if not current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified"
+        )
+    return current_user
+
+
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db)

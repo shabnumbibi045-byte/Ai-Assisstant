@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "your-encryption-key-32-bytes-long!"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/salim_ai"
+    # Database (MySQL)
+    DATABASE_URL: str = "mysql+aiomysql://root:password@localhost:3306/salim_ai"
     DATABASE_ECHO: bool = False
     
     # Redis

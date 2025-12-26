@@ -61,7 +61,7 @@ class ResearchProject(Base):
     status = Column(String(50), default="active")  # active, completed, archived
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
 
 
 class TravelBooking(Base):
@@ -93,7 +93,7 @@ class BankingMetadata(Base):
     last_synced = Column(DateTime)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
 
 
 class AuditLog(Base):
@@ -111,7 +111,7 @@ class AuditLog(Base):
     ip_address = Column(String(50))
     user_agent = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
     
     # Relationships
     user = relationship("User", back_populates="audit_logs")
@@ -130,7 +130,7 @@ class Document(Base):
     upload_date = Column(DateTime, default=datetime.utcnow)
     chunks_count = Column(Integer)
     status = Column(String(50), default="processing")  # processing, indexed, failed
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
     
     # Relationships
     owner = relationship("User", back_populates="documents")

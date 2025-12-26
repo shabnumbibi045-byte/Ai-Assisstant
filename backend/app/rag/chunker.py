@@ -1,7 +1,7 @@
 """Text Chunker - Split documents into manageable chunks."""
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import re
 
 logger = logging.getLogger(__name__)

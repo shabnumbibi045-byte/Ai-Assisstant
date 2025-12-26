@@ -27,7 +27,7 @@ class UserFact(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
-    metadata = Column(JSON)
+    extra_data = Column(JSON)
 
 
 class ConversationSummary(Base):
