@@ -65,8 +65,9 @@ async def get_current_user(
     if not user_id:
         raise credentials_exception
     
-    # Get user from database
-    stmt = select(User).where(User.user_id == user_id)
+    # Get user from database with permissions eagerly loaded
+    from sqlalchemy.orm import selectinload
+    stmt = select(User).where(User.user_id == user_id).options(selectinload(User.permissions))
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     

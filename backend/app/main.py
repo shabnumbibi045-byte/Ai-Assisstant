@@ -17,6 +17,12 @@ from app.config import settings
 from app.routers import chat, memory, rag, tools, setup
 from app.routers.voice import router as voice_router
 from app.routers.auth import router as auth_router
+from app.routers.plaid import router as plaid_router
+from app.routers.banking import router as banking_router
+from app.routers.stocks import router as stocks_router
+from app.routers.travel import router as travel_router
+from app.routers.research import router as research_router
+from app.routers.dashboard import router as dashboard_router
 from app.database.database import DatabaseManager
 
 # Configure logging
@@ -73,6 +79,12 @@ app.include_router(rag.router, prefix=settings.API_PREFIX)
 app.include_router(tools.router, prefix=settings.API_PREFIX)
 app.include_router(setup.router, prefix=settings.API_PREFIX)
 app.include_router(voice_router, prefix=settings.API_PREFIX)
+app.include_router(plaid_router, prefix=settings.API_PREFIX)
+app.include_router(banking_router, prefix=settings.API_PREFIX)
+app.include_router(stocks_router, prefix=settings.API_PREFIX)
+app.include_router(travel_router, prefix=settings.API_PREFIX)
+app.include_router(research_router, prefix=settings.API_PREFIX)
+app.include_router(dashboard_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

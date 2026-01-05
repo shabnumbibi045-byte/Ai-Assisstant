@@ -69,7 +69,8 @@ class AuthService:
         )
         
         db.add(user)
-        
+        await db.flush()  # Flush to get the user.id before creating permissions
+
         # Add default permissions
         default_modules = ["chat", "memory"]
         for module in default_modules:
@@ -81,7 +82,7 @@ class AuthService:
                 granted_at=datetime.utcnow()
             )
             db.add(permission)
-        
+
         await db.commit()
         await db.refresh(user)
         

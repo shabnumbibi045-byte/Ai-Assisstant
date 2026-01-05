@@ -166,6 +166,10 @@ export const chatAPI = {
   deleteSession: (sessionId) => api.delete(`/chat/sessions/${sessionId}`),
   submitFeedback: (data) => api.post('/chat/feedback', null, { params: data }),
   getStats: () => api.get('/chat/stats'),
+  // Database chat history endpoints
+  getDbSessions: (params) => api.get('/chat/db/sessions', { params }),
+  getDbSessionMessages: (sessionId, params) => api.get(`/chat/db/sessions/${sessionId}/messages`, { params }),
+  deleteDbSession: (sessionId) => api.delete(`/chat/db/sessions/${sessionId}`),
 };
 
 // Banking API

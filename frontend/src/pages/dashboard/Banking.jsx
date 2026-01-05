@@ -12,13 +12,19 @@ import {
   HiSearch,
   HiCreditCard,
   HiPlus,
+  HiX,
 } from 'react-icons/hi';
+import PlaidLink from '../../components/PlaidLink';
+import plaidApi from '../../services/plaidApi';
 
 const Banking = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedCountry, setSelectedCountry] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
   const [dateRange, setDateRange] = useState('7');
+  const [showPlaidModal, setShowPlaidModal] = useState(false);
+  const [plaidAccounts, setPlaidAccounts] = useState([]);
+  const [accessTokens, setAccessTokens] = useState({});
 
   // Mock data - would come from API
   const accounts = [
@@ -46,9 +52,12 @@ const Banking = () => {
     { code: 'KE', name: 'Kenya', flag: '🇰🇪' },
   ];
 
+  // Combine mock and Plaid accounts
+  const allAccounts = [...accounts, ...plaidAccounts];
+
   const filteredAccounts = selectedCountry === 'all'
-    ? accounts
-    : accounts.filter(a => a.country === selectedCountry);
+    ? allAccounts
+    : allAccounts.filter(a => a.country === selectedCountry);
 
   const totalBalance = filteredAccounts.reduce((sum, acc) => {
     // Simple USD conversion for display
@@ -66,6 +75,43 @@ const Banking = () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     toast.success('Account data refreshed');
     setIsLoading(false);
+  };
+
+  // Handle successful Plaid connection
+  const handlePlaidSuccess = (data) => {
+    const { accessToken, itemId, accounts: newAccounts, institution } = data;
+
+    // Store access token
+    setAccessTokens((prev) => ({
+      ...prev,
+      [itemId]: accessToken,
+    }));
+
+    // Format and add accounts
+    const formattedAccounts = newAccounts.map((account) => ({
+      id: `plaid_${account.account_id}`,
+      bank: institution.name,
+      country: 'US', // You can determine this based on institution
+      type: account.subtype || account.type,
+      balance: account.balance.current,
+      currency: account.balance.currency || 'USD',
+      change: 0,
+      plaidAccount: true,
+      itemId: itemId,
+      accountId: account.account_id,
+    }));
+
+    setPlaidAccounts((prev) => [...prev, ...formattedAccounts]);
+    setShowPlaidModal(false);
+  };
+
+  const handlePlaidExit = (error, metadata) => {
+    // Only close modal if user explicitly cancelled (not on authentication errors)
+    // This allows users to try again without reopening the modal
+    if (!error || error.error_code === 'USER_EXIT') {
+      setShowPlaidModal(false);
+    }
+    // For authentication errors, keep modal open so user can try again
   };
 
   return (
@@ -217,7 +263,10 @@ const Banking = () => {
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-white">Accounts</h3>
-              <button className="btn-ghost text-sm flex items-center gap-1">
+              <button
+                onClick={() => setShowPlaidModal(true)}
+                className="btn-ghost text-sm flex items-center gap-1"
+              >
                 <HiPlus className="w-4 h-4" />
                 Add Account
               </button>
@@ -381,6 +430,56 @@ const Banking = () => {
               <span className="badge-secondary">{report.format}</span>
             </motion.div>
           ))}
+        </div>
+      )}
+
+      {/* Plaid Modal */}
+      {showPlaidModal && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            // Close modal when clicking outside
+            if (e.target === e.currentTarget) {
+              setShowPlaidModal(false);
+            }
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-white">Connect Bank Account</h2>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowPlaidModal(false);
+                }}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <HiX className="w-6 h-6" />
+              </button>
+            </div>
+
+            <p className="text-slate-400 mb-6">
+              Securely connect your bank account using Plaid. Your credentials are encrypted and never stored.
+            </p>
+
+            <PlaidLink
+              onSuccess={handlePlaidSuccess}
+              onExit={handlePlaidExit}
+              countryCodes={['US', 'CA']}
+            />
+
+            <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+              <p className="text-sm text-blue-400">
+                <strong>Note:</strong> Currently in sandbox mode. Use Plaid's test credentials to test the integration.
+              </p>
+            </div>
+          </motion.div>
         </div>
       )}
     </div>

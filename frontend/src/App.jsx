@@ -1,6 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
+import CustomToast from './components/CustomToast';
 
 // Layouts
 import AuthLayout from './layouts/AuthLayout';
@@ -63,7 +64,9 @@ const PublicRoute = ({ children }) => {
 
 function App() {
   return (
-    <Routes>
+    <>
+      <CustomToast />
+      <Routes>
       {/* Auth Routes */}
       <Route element={<AuthLayout />}>
         <Route
@@ -131,6 +134,7 @@ function App() {
         }
       />
     </Routes>
+    </>
   );
 }
 

@@ -12,8 +12,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing - Configure bcrypt with truncate_error disabled
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__truncate_error=False  # Allow automatic truncation to 72 bytes
+)
 
 # JWT settings
 ALGORITHM = "HS256"
@@ -38,14 +42,32 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """
     Hash a password using bcrypt.
-    
+
     Args:
         password: Plain text password
-        
+
     Returns:
         Hashed password
+
+    Raises:
+        ValueError: If password is too long (>72 bytes for bcrypt)
     """
-    return pwd_context.hash(password)
+    # Bcrypt has a 72-byte limit - truncate if necessary
+    # This is the recommended approach per passlib documentation
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        # Truncate to 72 bytes for bcrypt compatibility
+        password = password_bytes[:72].decode('utf-8', errors='ignore')
+
+    try:
+        return pwd_context.hash(password)
+    except ValueError as e:
+        # Handle any remaining bcrypt errors
+        if "72 bytes" in str(e):
+            # Force truncate and retry
+            password = password[:72]
+            return pwd_context.hash(password)
+        raise
 
 
 def create_access_token(

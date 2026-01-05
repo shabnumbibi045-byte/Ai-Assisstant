@@ -8,7 +8,7 @@ from datetime import datetime
 class UserCreate(BaseModel):
     """User registration request."""
     email: EmailStr
-    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+    password: str = Field(..., min_length=8, max_length=72, description="Password must be between 8 and 72 characters")
     full_name: str = Field(..., min_length=2, max_length=100)
     phone: Optional[str] = None
     
@@ -66,7 +66,7 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     """Password change request."""
     current_password: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8, max_length=72)
 
 
 class PasswordReset(BaseModel):
@@ -77,7 +77,7 @@ class PasswordReset(BaseModel):
 class PasswordResetConfirm(BaseModel):
     """Password reset confirmation."""
     token: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8, max_length=72)
 
 
 class Token(BaseModel):

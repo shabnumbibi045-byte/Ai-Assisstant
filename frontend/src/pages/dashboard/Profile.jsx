@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import toast from 'react-hot-toast';
+import React, { useState, useEffect } from 'react';
+import { showToast } from '../../components/CustomToast';
+import { useAuthStore } from '../../store/authStore';
+import api from '../../services/api';
 import {
   HiUser,
   HiMail,
@@ -21,18 +22,55 @@ const Profile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const { user, updateUser } = useAuthStore();
 
   const [profile, setProfile] = useState({
-    firstName: 'John',
-    lastName: 'Smith',
-    email: 'john.smith@example.com',
-    phone: '+1 (416) 555-0123',
-    company: 'LeStrap Enterprises',
-    role: 'Business Owner',
-    location: 'Toronto, Canada',
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    company: '',
+    role: '',
+    location: '',
     timezone: 'America/Toronto',
     avatar: null,
   });
+
+  // Load user data on component mount
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.get('/auth/me');
+        const userData = response.data;
+
+        // Parse full_name into firstName and lastName
+        const nameParts = (userData.full_name || '').split(' ');
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+
+        setProfile({
+          firstName,
+          lastName,
+          email: userData.email || '',
+          phone: userData.phone || '',
+          company: userData.company || '',
+          role: userData.role || '',
+          location: userData.location || '',
+          timezone: userData.timezone || 'America/Toronto',
+          avatar: null,
+        });
+      } catch (error) {
+        console.error('Failed to load user data:', error);
+        showToast('Failed to load user data', 'error');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadUserData();
+  }, []);
 
   const [passwords, setPasswords] = useState({
     current: '',
@@ -47,32 +85,74 @@ const Profile = () => {
   ]);
 
   const handleSave = async () => {
-    setIsSaving(true);
-    await new Promise(r => setTimeout(r, 1500));
-    toast.success('Profile updated successfully');
-    setIsSaving(false);
-    setIsEditing(false);
+    try {
+      setIsSaving(true);
+
+      // Prepare the update data
+      const updateData = {
+        full_name: `${profile.firstName} ${profile.lastName}`.trim(),
+        phone: profile.phone || null,
+        // Add any other fields your backend supports
+      };
+
+      // Send update request to backend
+      await api.put('/auth/me', updateData);
+
+      // Update local user state
+      updateUser({
+        full_name: updateData.full_name,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        phone: profile.phone,
+      });
+
+      showToast('Profile updated successfully', 'success');
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      showToast(error.response?.data?.detail || 'Failed to update profile', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleChangePassword = async () => {
     if (passwords.new !== passwords.confirm) {
-      toast.error('Passwords do not match');
+      showToast('Passwords do not match', 'error');
       return;
     }
     if (passwords.new.length < 8) {
-      toast.error('Password must be at least 8 characters');
+      showToast('Password must be at least 8 characters', 'error');
       return;
     }
 
-    await new Promise(r => setTimeout(r, 1500));
-    toast.success('Password changed successfully');
-    setShowChangePassword(false);
-    setPasswords({ current: '', new: '', confirm: '' });
+    try {
+      await api.post('/auth/change-password', {
+        current_password: passwords.current,
+        new_password: passwords.new,
+      });
+
+      showToast('Password changed successfully', 'success');
+      setShowChangePassword(false);
+      setPasswords({ current: '', new: '', confirm: '' });
+    } catch (error) {
+      console.error('Failed to change password:', error);
+      showToast(error.response?.data?.detail || 'Failed to change password', 'error');
+    }
   };
 
   const handleRevokeSession = (sessionId) => {
-    toast.success('Session revoked');
+    showToast('Session revoked', 'success');
   };
+
+  // Show loading state while fetching user data
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="spinner w-12 h-12"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -124,18 +204,14 @@ const Profile = () => {
         {/* Profile Card */}
         <div className="lg:col-span-2 space-y-6">
           {/* Basic Info */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="card"
-          >
+          <div className="card">
             <h2 className="text-lg font-semibold text-white mb-6">Personal Information</h2>
 
             {/* Avatar */}
             <div className="flex items-center gap-6 mb-6">
               <div className="relative">
                 <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center text-white text-3xl font-bold">
-                  {profile.firstName[0]}{profile.lastName[0]}
+                  {profile.firstName?.[0] || 'U'}{profile.lastName?.[0] || 'N'}
                 </div>
                 {isEditing && (
                   <button className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-primary-500 flex items-center justify-center text-white shadow-lg">
@@ -246,15 +322,10 @@ const Profile = () => {
                 </select>
               </div>
             </div>
-          </motion.div>
+          </div>
 
           {/* Security */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="card"
-          >
+          <div className="card">
             <h2 className="text-lg font-semibold text-white mb-6">Security</h2>
 
             {/* Change Password */}
@@ -333,15 +404,10 @@ const Profile = () => {
               </div>
               <span className="badge bg-emerald-500/20 text-emerald-400">Enabled</span>
             </div>
-          </motion.div>
+          </div>
 
           {/* Active Sessions */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="card"
-          >
+          <div className="card">
             <h2 className="text-lg font-semibold text-white mb-6">Active Sessions</h2>
 
             <div className="space-y-3">
@@ -374,17 +440,13 @@ const Profile = () => {
                 </div>
               ))}
             </div>
-          </motion.div>
+          </div>
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Account Stats */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="card"
-          >
+          <div className="card">
             <h3 className="text-lg font-semibold text-white mb-4">Account Stats</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -404,15 +466,10 @@ const Profile = () => {
                 <span className="font-medium text-white">2.4 GB / 10 GB</span>
               </div>
             </div>
-          </motion.div>
+          </div>
 
           {/* Quick Actions */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="card"
-          >
+          <div className="card">
             <h3 className="text-lg font-semibold text-white mb-4">Quick Actions</h3>
             <div className="space-y-2">
               <button className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-800 transition-colors text-left">
@@ -428,21 +485,16 @@ const Profile = () => {
                 <span>Delete Account</span>
               </button>
             </div>
-          </motion.div>
+          </div>
 
           {/* Support */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="card bg-gradient-to-br from-primary-600/20 to-secondary-600/20 border-primary-500/30"
-          >
+          <div className="card bg-gradient-to-br from-primary-600/20 to-secondary-600/20 border-primary-500/30">
             <h3 className="text-lg font-semibold text-white mb-2">Need Help?</h3>
             <p className="text-slate-400 text-sm mb-4">
               Our support team is available 24/7 to assist you.
             </p>
             <button className="btn-primary w-full">Contact Support</button>
-          </motion.div>
+          </div>
         </div>
       </div>
     </div>

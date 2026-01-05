@@ -6,11 +6,15 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
 from app.auth.dependencies import get_current_user, get_current_verified_user
 from app.database.models import User
+from app.database.chat_models import ChatSession, ChatMessage
+from app.database.database import get_db_session
 from app.memory.memory_orchestrator import MemoryOrchestrator
 from app.memory.short_term import ShortTermMemory
 from app.memory.long_term import LongTermMemory
@@ -69,6 +73,63 @@ class ChatSummary(BaseModel):
 _memory_orchestrator: Optional[MemoryOrchestrator] = None
 
 
+async def get_or_create_chat_session(
+    db: AsyncSession,
+    session_id: str,
+    user_id: int,
+    first_message: str = None
+) -> ChatSession:
+    """Get existing chat session or create a new one."""
+    result = await db.execute(
+        select(ChatSession).where(ChatSession.session_id == session_id)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        # Generate title from first message (first 50 chars)
+        title = None
+        if first_message:
+            title = first_message[:50] + "..." if len(first_message) > 50 else first_message
+
+        session = ChatSession(
+            session_id=session_id,
+            user_id=user_id,
+            title=title,
+            message_count=0
+        )
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
+
+    return session
+
+
+async def save_chat_message(
+    db: AsyncSession,
+    session: ChatSession,
+    role: str,
+    content: str,
+    tokens_used: int = 0
+) -> ChatMessage:
+    """Save a chat message to the database."""
+    message = ChatMessage(
+        session_id=session.id,
+        role=role,
+        content=content,
+        tokens_used=tokens_used
+    )
+    db.add(message)
+
+    # Update session
+    session.message_count += 1
+    session.updated_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(message)
+
+    return message
+
+
 async def get_memory_orchestrator() -> MemoryOrchestrator:
     """Get or create memory orchestrator instance."""
     global _memory_orchestrator
@@ -107,11 +168,12 @@ async def get_memory_orchestrator() -> MemoryOrchestrator:
 @router.post("/", response_model=ChatResponse)
 async def chat(
     request: AuthenticatedChatRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Main chat endpoint with authentication.
-    
+
     Handles:
     - Conversation with LLM
     - Memory retrieval and storage
@@ -122,6 +184,14 @@ async def chat(
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         user_id = str(current_user.id)
+
+        # Get or create chat session in database
+        chat_session = await get_or_create_chat_session(
+            db=db,
+            session_id=session_id,
+            user_id=current_user.id,
+            first_message=request.message
+        )
         
         # Get memory orchestrator
         memory = await get_memory_orchestrator()
@@ -174,7 +244,31 @@ async def chat(
             chat_request.message = f"Context:\n{context}\n\nUser message: {request.message}"
         
         response = await chat_service.process_message(chat_request)
-        
+
+        # Save messages to database
+        try:
+            # Save user message
+            await save_chat_message(
+                db=db,
+                session=chat_session,
+                role="user",
+                content=request.message,
+                tokens_used=0
+            )
+
+            # Save assistant response
+            await save_chat_message(
+                db=db,
+                session=chat_session,
+                role="assistant",
+                content=response.response,
+                tokens_used=response.tokens_used if hasattr(response, 'tokens_used') else 0
+            )
+
+            logger.info(f"Messages saved to database for session {session_id}")
+        except Exception as e:
+            logger.warning(f"Database storage error: {e}")
+
         # Store in memory
         if request.use_memory and memory:
             try:
@@ -185,7 +279,7 @@ async def chat(
                     role="user",
                     content=request.message
                 )
-                
+
                 # Store assistant response
                 await memory.store_message(
                     user_id=user_id,
@@ -195,9 +289,9 @@ async def chat(
                 )
             except Exception as e:
                 logger.warning(f"Memory storage error: {e}")
-        
+
         logger.info(f"Chat processed for user {user_id}, session {session_id}")
-        
+
         return response
         
     except Exception as e:
@@ -368,7 +462,7 @@ async def get_chat_stats(
     try:
         user_id = str(current_user.id)
         memory = await get_memory_orchestrator()
-        
+
         if not memory:
             return {
                 "total_sessions": 0,
@@ -376,12 +470,151 @@ async def get_chat_stats(
                 "tokens_used_today": 0,
                 "most_used_module": None
             }
-        
+
         # Get stats from memory
         stats = await memory.get_user_stats(user_id=user_id)
-        
+
         return stats
-        
+
     except Exception as e:
         logger.error(f"Get stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# DATABASE CHAT HISTORY ENDPOINTS
+# ============================================
+
+@router.get("/db/sessions")
+async def get_database_sessions(
+    limit: int = 20,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Get chat sessions from database."""
+    try:
+        result = await db.execute(
+            select(ChatSession)
+            .where(ChatSession.user_id == current_user.id)
+            .order_by(ChatSession.updated_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        sessions = result.scalars().all()
+
+        count_result = await db.execute(
+            select(ChatSession).where(ChatSession.user_id == current_user.id)
+        )
+        total = len(count_result.scalars().all())
+
+        return {
+            "sessions": [
+                {
+                    "session_id": s.session_id,
+                    "title": s.title,
+                    "message_count": s.message_count,
+                    "created_at": s.created_at.isoformat(),
+                    "updated_at": s.updated_at.isoformat()
+                }
+                for s in sessions
+            ],
+            "total": total
+        }
+
+    except Exception as e:
+        logger.error(f"Get database sessions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/db/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Get messages for a specific chat session from database."""
+    try:
+        # Verify session belongs to user
+        result = await db.execute(
+            select(ChatSession).where(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id
+            )
+        )
+        session = result.scalar_one_or_none()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        messages_result = await db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        messages = messages_result.scalars().all()
+
+        return {
+            "session_id": session_id,
+            "title": session.title,
+            "messages": [
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at.isoformat(),
+                    "tokens_used": m.tokens_used
+                }
+                for m in messages
+            ],
+            "total_messages": session.message_count
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get session messages error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/db/sessions/{session_id}")
+async def delete_database_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Delete a chat session from database."""
+    try:
+        # Verify session belongs to user
+        result = await db.execute(
+            select(ChatSession).where(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id
+            )
+        )
+        session = result.scalar_one_or_none()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Delete session (cascade will delete messages)
+        db.delete(session)
+        await db.commit()
+
+        logger.info(f"Deleted session {session_id} for user {current_user.id}")
+
+        return {
+            "status": "success",
+            "message": f"Session {session_id} deleted"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete database session error: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

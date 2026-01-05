@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { useAuthStore } from '../../store/authStore';
-import toast from 'react-hot-toast';
+import { showToast } from '../../components/CustomToast';
 import { HiMail, HiLockClosed, HiEye, HiEyeOff, HiSparkles } from 'react-icons/hi';
 
 const Login = () => {
@@ -14,33 +13,64 @@ const Login = () => {
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
+    // CRITICAL: Prevent any form submission behavior
     e.preventDefault();
+    e.stopPropagation();
+
+    // Basic validation
+    if (!email.trim()) {
+      showToast('Please enter your email address', 'warning');
+      return false;
+    }
+
+    if (!password) {
+      showToast('Please enter your password', 'warning');
+      return false;
+    }
+
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      showToast('Please enter a valid email address', 'warning');
+      return false;
+    }
+
     setIsLoading(true);
 
-    const result = await login(email, password);
-    
-    if (result.success) {
-      toast.success('Welcome back!');
-      navigate('/dashboard');
-    } else {
-      toast.error(result.error);
+    try {
+      const result = await login(email.trim().toLowerCase(), password);
+
+      if (result.success) {
+        showToast(result.message || 'Login successful! Welcome back!', 'success');
+
+        // Small delay for better UX (let user see the success message)
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 500);
+      } else {
+        showToast(result.error, 'error');
+
+        // Clear password field on failed login
+        setPassword('');
+      }
+    } catch (error) {
+      console.error('Unexpected login error:', error);
+      showToast('An unexpected error occurred. Please try again.', 'error');
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
+
+    return false;
   };
 
   const handleDemoMode = () => {
     setDemoMode();
-    toast.success('Welcome to Demo Mode! Explore all features.');
+    showToast('Welcome to Demo Mode! Explore all features.', 'success');
     navigate('/dashboard');
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-    >
+    <div>
       {/* Mobile logo */}
       <div className="lg:hidden text-center mb-8">
         <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shadow-glow">
@@ -163,7 +193,7 @@ const Login = () => {
           Sign up
         </Link>
       </p>
-    </motion.div>
+    </div>
   );
 };
 

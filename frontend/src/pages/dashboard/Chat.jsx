@@ -22,9 +22,10 @@ const Chat = () => {
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  
+
   const {
     messages,
     sessions,
@@ -35,12 +36,41 @@ const Chat = () => {
     setTyping,
     setCurrentSession,
     clearMessages,
+    setSessions,
   } = useChatStore();
+
+  // Fetch chat sessions on mount
+  useEffect(() => {
+    // Only fetch if user is authenticated
+    const fetchSessions = async () => {
+      try {
+        await fetchChatSessions();
+      } catch (error) {
+        console.error('Error fetching sessions on mount:', error);
+      }
+    };
+
+    fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const fetchChatSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      const response = await chatAPI.getDbSessions({ limit: 20 });
+      setSessions(response.data.sessions || []);
+    } catch (error) {
+      console.error('Failed to fetch chat sessions:', error);
+      setSessions([]); // Set empty array on error
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
 
   // Suggested prompts
   const suggestions = [
@@ -50,6 +80,23 @@ const Chat = () => {
     "Export my weekly transactions for the accountant",
     "Find legal cases about contract disputes in Canada",
   ];
+
+  const loadSessionMessages = async (sessionId) => {
+    try {
+      const response = await chatAPI.getDbSessionMessages(sessionId);
+      const formattedMessages = response.data.messages.map(msg => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.created_at,
+      }));
+      setMessages(formattedMessages);
+      setCurrentSession(sessionId);
+    } catch (error) {
+      console.error('Failed to load session messages:', error);
+      toast.error('Failed to load chat history');
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -77,6 +124,9 @@ const Chat = () => {
         tool_calls: response.data.tool_calls,
         sources: response.data.sources,
       });
+
+      // Refresh sessions list to show updated session
+      await fetchChatSessions();
     } catch (error) {
       toast.error('Failed to get response');
       addMessage({
@@ -105,6 +155,31 @@ const Chat = () => {
     setCurrentSession(null);
   };
 
+  const handleDeleteSession = async (sessionId, e) => {
+    e.stopPropagation(); // Prevent triggering session load
+
+    if (!window.confirm('Are you sure you want to delete this chat session?')) {
+      return;
+    }
+
+    try {
+      await chatAPI.deleteDbSession(sessionId);
+      toast.success('Chat session deleted');
+
+      // If deleted session was current, clear messages
+      if (currentSessionId === sessionId) {
+        clearMessages();
+        setCurrentSession(null);
+      }
+
+      // Refresh sessions list
+      await fetchChatSessions();
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      toast.error('Failed to delete chat session');
+    }
+  };
+
   return (
     <div className="flex h-[calc(100vh-8rem)] -m-4 lg:-m-8">
       {/* Chat Sessions Sidebar */}
@@ -126,24 +201,43 @@ const Chat = () => {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {sessions.length === 0 ? (
+              {loadingSessions ? (
+                <p className="text-slate-500 text-sm text-center py-4">
+                  Loading...
+                </p>
+              ) : sessions.length === 0 ? (
                 <p className="text-slate-500 text-sm text-center py-4">
                   No chat history yet
                 </p>
               ) : (
                 sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    onClick={() => setCurrentSession(session.id)}
-                    className={`w-full p-3 rounded-xl text-left transition-colors ${
-                      currentSessionId === session.id
+                  <div
+                    key={session.session_id}
+                    onClick={() => loadSessionMessages(session.session_id)}
+                    className={`group relative w-full p-3 rounded-xl text-left transition-colors cursor-pointer ${
+                      currentSessionId === session.session_id
                         ? 'bg-primary-500/20 border border-primary-500/30'
                         : 'hover:bg-slate-800'
                     }`}
                   >
-                    <p className="text-sm text-slate-200 truncate">{session.title || 'Chat Session'}</p>
-                    <p className="text-xs text-slate-500">{session.date}</p>
-                  </button>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-200 truncate">
+                          {session.title || 'New Chat'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {session.message_count} messages • {new Date(session.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteSession(session.session_id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-400 transition-opacity"
+                        title="Delete chat"
+                      >
+                        <HiTrash className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                 ))
               )}
             </div>

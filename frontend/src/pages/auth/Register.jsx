@@ -24,13 +24,36 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    // Validation error toast styling
+    const errorToastStyle = {
+      duration: 4000,
+      icon: '⚠️',
+      position: 'top-right',
+      style: {
+        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+        color: '#ffffff',
+        border: '1px solid #d97706',
+        borderRadius: '12px',
+        padding: '16px 24px',
+        fontSize: '15px',
+        fontWeight: '600',
+        boxShadow: '0 10px 25px -5px rgba(245, 158, 11, 0.4)',
+        zIndex: 999999,
+      },
+    };
+
     if (formData.password !== formData.confirmPassword) {
-      toast.error('Passwords do not match');
+      toast.error('Passwords do not match', errorToastStyle);
       return;
     }
 
     if (formData.password.length < 8) {
-      toast.error('Password must be at least 8 characters');
+      toast.error('Password must be at least 8 characters', errorToastStyle);
+      return;
+    }
+
+    if (formData.password.length > 72) {
+      toast.error('Password cannot exceed 72 characters', errorToastStyle);
       return;
     }
 
@@ -41,14 +64,50 @@ const Register = () => {
       email: formData.email,
       password: formData.password,
     });
-    
+
     if (result.success) {
-      toast.success('Account created successfully!');
-      navigate('/dashboard');
+      // Show success message with custom styling
+      toast.success(result.message || 'Account created successfully! Please login to continue.', {
+        duration: 4000,
+        icon: '✅',
+        position: 'top-right',
+        style: {
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: '#ffffff',
+          border: '1px solid #059669',
+          borderRadius: '12px',
+          padding: '16px 24px',
+          fontSize: '15px',
+          fontWeight: '600',
+          boxShadow: '0 10px 25px -5px rgba(16, 185, 129, 0.4)',
+          zIndex: 999999,
+        },
+      });
+
+      // Redirect to login page after a brief delay
+      setTimeout(() => {
+        navigate('/login');
+      }, 1000);
     } else {
-      toast.error(result.error);
+      // Show error message with custom styling
+      toast.error(result.error, {
+        duration: 4000,
+        icon: '❌',
+        position: 'top-right',
+        style: {
+          background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+          color: '#ffffff',
+          border: '1px solid #dc2626',
+          borderRadius: '12px',
+          padding: '16px 24px',
+          fontSize: '15px',
+          fontWeight: '600',
+          boxShadow: '0 10px 25px -5px rgba(239, 68, 68, 0.4)',
+          zIndex: 999999,
+        },
+      });
     }
-    
+
     setIsLoading(false);
   };
 

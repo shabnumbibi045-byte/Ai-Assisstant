@@ -39,7 +39,7 @@ export const useChatStore = create((set, get) => ({
   
   // Set sessions list
   setSessions: (sessions) => {
-    set({ sessions });
+    set({ sessions: sessions || [] });
   },
   
   // Add session

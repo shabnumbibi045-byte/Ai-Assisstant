@@ -38,28 +38,40 @@ export const useAuthStore = create(
       // Then we need to fetch user data from /auth/me
       login: async (email, password) => {
         try {
+          // Validate inputs
+          if (!email || !password) {
+            return {
+              success: false,
+              error: 'Please enter both email and password'
+            };
+          }
+
           // Step 1: Get tokens
           const tokenResponse = await api.post('/auth/login', { email, password });
           const { access_token, refresh_token } = tokenResponse.data;
-          
+
           // Store tokens first so interceptor can use them
           set({
             token: access_token,
             refreshToken: refresh_token,
           });
-          
+
           // Step 2: Get user data with new token
           const userResponse = await api.get('/auth/me');
-          
+
           set({
             user: transformUserResponse(userResponse.data),
             isAuthenticated: true,
             isLoading: false,
           });
-          
-          return { success: true };
+
+          return {
+            success: true,
+            message: `Welcome back, ${transformUserResponse(userResponse.data).firstName || 'User'}!`
+          };
         } catch (error) {
           console.error('Login error:', error);
+
           // Clear any partial state
           set({
             user: null,
@@ -67,52 +79,56 @@ export const useAuthStore = create(
             refreshToken: null,
             isAuthenticated: false,
           });
-          return { 
-            success: false, 
-            error: error.response?.data?.detail || 'Login failed. Please check your credentials.' 
+
+          // Provide specific error messages based on status code
+          let errorMessage = 'Login failed. Please try again.';
+
+          if (error.response) {
+            const status = error.response.status;
+            const detail = error.response.data?.detail;
+
+            if (status === 401) {
+              errorMessage = detail || 'Invalid email or password. Please check your credentials and try again.';
+            } else if (status === 403) {
+              errorMessage = 'Your account has been disabled. Please contact support.';
+            } else if (status === 500) {
+              errorMessage = 'Server error. Please try again later.';
+            } else if (detail) {
+              errorMessage = detail;
+            }
+          } else if (error.request) {
+            errorMessage = 'Cannot connect to server. Please check your internet connection.';
+          }
+
+          return {
+            success: false,
+            error: errorMessage
           };
         }
       },
 
-      // Register - Backend returns UserResponse, then we need to login to get tokens
+      // Register - Only create account, user must login separately
       register: async (userData) => {
         try {
-          // Step 1: Register user
-          await api.post('/auth/register', {
+          // Register user only - no automatic login
+          const response = await api.post('/auth/register', {
             email: userData.email,
             password: userData.password,
-            full_name: `${userData.firstName} ${userData.lastName}`,
+            full_name: userData.name || userData.full_name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
             phone: userData.phone || null,
           });
-          
-          // Step 2: Login with same credentials to get tokens
-          const tokenResponse = await api.post('/auth/login', { 
-            email: userData.email, 
-            password: userData.password 
-          });
-          const { access_token, refresh_token } = tokenResponse.data;
-          
-          // Store tokens
-          set({
-            token: access_token,
-            refreshToken: refresh_token,
-          });
-          
-          // Step 3: Get user data
-          const userResponse = await api.get('/auth/me');
-          
-          set({
-            user: transformUserResponse(userResponse.data),
-            isAuthenticated: true,
-            isLoading: false,
-          });
-          
-          return { success: true };
+
+          // Return success with user data (but don't login)
+          return {
+            success: true,
+            user: response.data,
+            message: 'Account created successfully! Please login to continue.'
+          };
         } catch (error) {
           console.error('Registration error:', error);
-          return { 
-            success: false, 
-            error: error.response?.data?.detail || 'Registration failed. Please try again.' 
+          return {
+            success: false,
+            error: error.response?.data?.detail || 'Registration failed. Please try again.'
           };
         }
       },
