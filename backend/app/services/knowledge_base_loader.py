@@ -127,24 +127,30 @@ class KnowledgeBaseLoader:
         return """
         BANKING KNOWLEDGE SUMMARY:
 
-        Multi-Country Banking:
-        - Canada: TD, RBC, BMO, Scotiabank - Business accounts require CAD $5-10K minimum
-        - USA: JPMorgan Chase, Bank of America - FDIC insured up to $250K
-        - Kenya: KCB, Equity Bank - M-PESA integration for 96% of households
+        ⚠️ CRITICAL: User must connect their bank account via Plaid to access real banking data.
+        DO NOT provide example or mock banking data. ALWAYS use the banking tools to fetch real-time data.
 
-        Currency Exchange Rates:
+        Multi-Country Banking Support:
+        - Canada (CA): CAD currency
+        - USA (US): USD currency
+        - Kenya (KE): KES currency
+
+        Currency Exchange (General Market Rates - Not User-Specific):
         - USD to CAD: ~1.35
         - USD to KES: ~129.50
         - Best transfer methods: Wise (0.5-2% fees), bank wires ($25-50)
 
-        Transaction Categories:
+        Transaction Categories (for categorization):
         - Operating Expenses, Marketing, Professional Services
         - Personal: Housing, Transportation, Food, Healthcare
 
-        Compliance:
+        Compliance Requirements:
         - Canada: FINTRAC requirements, $10K reporting threshold
         - USA: BSA compliance, SAR filing
         - Kenya: CBK oversight, Anti-Money Laundering Act
+
+        REMINDER: This is general banking knowledge. For user's actual accounts, balances, and transactions,
+        you MUST call the banking tools which fetch real data from Plaid. Never invent account details.
         """
 
     @classmethod
@@ -283,41 +289,28 @@ class KnowledgeBaseLoader:
 ⚠️  CRITICAL INSTRUCTIONS - MUST FOLLOW:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. **MANDATORY**: You MUST use information from the KNOWLEDGE BASE CONTEXT above in your response
-2. **USE DEMO DATA**: If DEMO DATA is provided, incorporate it directly into your response with actual numbers
-3. **REFERENCE SPECIFIC DATA**: Use actual bank names, numbers, fees, and facts from the context
-4. **BE DETAILED**: Provide comprehensive answers with sections, bullets, and specific examples
-5. **FORMAT WELL**: Use **bold**, bullets, and clear sections for readability
-6. **BE CONVERSATIONAL**: Sound natural and helpful, not robotic
-7. **PROVIDE VALUE**: Give actionable recommendations and next steps
+1. **MANDATORY FOR BANKING**: You MUST call banking tools to fetch REAL Plaid data
+2. **NO MOCK DATA**: NEVER use example bank names, account numbers, or balances unless returned from real tools
+3. **CHECK CONNECTION FIRST**: Before answering banking questions, verify user has connected their bank via Plaid
+4. **USE REAL TOOL DATA**: Only reference actual data returned from tool calls, not examples from knowledge base
+5. **BE DETAILED**: Provide comprehensive answers with sections, bullets, and specific examples FROM REAL DATA
+6. **FORMAT WELL**: Use **bold**, bullets, and clear sections for readability
+7. **BE CONVERSATIONAL**: Sound natural and helpful, not robotic
+8. **PROVIDE VALUE**: Give actionable recommendations and next steps
 
-❌ DO NOT:
-- Give generic responses without using the knowledge base
-- Say "I can help with that" without details
-- Ignore the specific information provided above
-- Be vague or unhelpful
+❌ DO NOT FOR BANKING:
+- Use example bank names like "TD Canada Trust", "RBC", "Chase", "Bank of America" unless they're from real Plaid data
+- Fabricate account numbers, balances, or transactions
+- Provide banking information without calling the tools first
+- Use "demo data" or "example accounts" in banking responses
 
-✅ GOOD EXAMPLE:
-"Based on the banking knowledge, the best banks in Canada for business are:
+✅ CORRECT BANKING FLOW:
+1. User asks about banking → Call list_bank_accounts tool
+2. If NO_BANK_CONNECTED error → Tell user to connect bank via Plaid in the Banking page
+3. If accounts found → Use REAL data from tool response to answer
+4. Format response with actual account names, real balances, real transactions from tools
 
-**TD Canada Trust**
-- Business account minimum: $5,000 CAD
-- Fee: $15/month (waived with minimum balance)
-- 1,100+ branches nationwide
-- Excellent online banking platform
-
-**RBC (Royal Bank of Canada)**
-- Business Builder account
-- $15.95/month
-- Strong commercial lending
-- Great for international transactions
-
-**BMO Bank of Montreal**
-- Low startup fees
-- Good mobile banking
-- Comprehensive business services
-
-Would you like specific recommendations based on your business size or industry?"
+For non-banking domains (stocks, travel, research), you can use the knowledge base information as before.
 
 NOW ANSWER THE USER'S QUESTION USING THE KNOWLEDGE BASE ABOVE:
 """

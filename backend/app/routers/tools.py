@@ -50,21 +50,39 @@ class ToolDetailResponse(BaseModel):
 # ============================================
 
 def get_user_permissions(user: User) -> Dict[str, bool]:
-    """Extract user permissions from preferences."""
-    preferences = user.preferences or {}
-    module_perms = preferences.get("module_permissions", {})
-    
-    # Flatten permissions into a single dict
+    """Extract user permissions from user_permissions table."""
     permissions = {}
-    for module, perms in module_perms.items():
-        for perm_name, value in perms.items():
-            permissions[f"{module}.{perm_name}"] = value
-    
+
+    # Get permissions from user_permissions table
+    if hasattr(user, 'permissions') and user.permissions:
+        for perm in user.permissions:
+            if perm.granted:
+                # Create permission keys like "travel_read", "banking_read", etc.
+                perm_key = f"{perm.module}_{perm.permission_type}"
+                permissions[perm_key] = True
+
+    # Fallback to preferences if no permissions found
+    if not permissions:
+        preferences = user.preferences or {}
+        module_perms = preferences.get("module_permissions", {})
+        for module, perms in module_perms.items():
+            for perm_name, value in perms.items():
+                permissions[f"{module}.{perm_name}"] = value
+
     return permissions
 
 
 def get_user_enabled_modules(user: User) -> List[str]:
     """Get list of enabled modules for user."""
+    # Get enabled modules from user_permissions table
+    if hasattr(user, 'permissions') and user.permissions:
+        modules = list(set(
+            perm.module for perm in user.permissions if perm.granted
+        ))
+        if modules:
+            return modules
+
+    # Fallback to preferences if no permissions found
     preferences = user.preferences or {}
     return preferences.get("modules_enabled", ["chat", "memory"])
 

@@ -24,7 +24,7 @@ const AuthLayout = () => {
                 </svg>
               </div>
               <h1 className="text-4xl font-display font-bold gradient-text mb-2">
-                Salim AI
+                AN INTELLIGENT AI
               </h1>
               <p className="text-slate-400 text-lg">Your Intelligent Assistant</p>
             </div>

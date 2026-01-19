@@ -73,7 +73,7 @@ class SearchFlightsTool(BaseTool):
                 message="Permission denied",
                 error="User does not have travel_read permission"
             )
-        
+
         origin = parameters.get("origin")
         destination = parameters.get("destination")
         departure_date = parameters.get("departure_date")
@@ -81,7 +81,7 @@ class SearchFlightsTool(BaseTool):
         passengers = parameters.get("passengers", 1)
         cabin_class = parameters.get("cabin_class", "economy")
         providers = parameters.get("providers", ["all"])
-        
+
         if not all([origin, destination, departure_date]):
             return ToolResult(
                 success=False,
@@ -89,138 +89,145 @@ class SearchFlightsTool(BaseTool):
                 message="Missing required parameters",
                 error="Origin, destination, and departure_date are required"
             )
-        
-        # STUBBED: Mock flight search results from multiple providers
-        airlines = ["Air Canada", "United Airlines", "Delta", "American Airlines", "British Airways", "Emirates", "Kenya Airways"]
-        
-        results = []
-        
-        # FareCompare results
-        for i in range(3):
-            base_price = random.randint(400, 1500)
-            results.append({
-                "provider": "FareCompare",
-                "airline": random.choice(airlines),
-                "flight_number": f"{random.choice(['AC', 'UA', 'DL', 'AA', 'BA'])}{random.randint(100, 999)}",
-                "origin": origin,
-                "destination": destination,
-                "departure": f"{departure_date}T{random.randint(6, 20):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "arrival": f"{departure_date}T{random.randint(10, 23):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "duration": f"{random.randint(2, 12)}h {random.randint(0, 59)}m",
-                "stops": random.randint(0, 2),
-                "cabin_class": cabin_class,
-                "price": base_price,
-                "currency": "USD",
-                "total_price": base_price * passengers,
-                "baggage": "1 carry-on, 1 checked",
-                "refundable": random.choice([True, False]),
-                "booking_link": "https://farecompare.com/book/..."
-            })
-        
-        # Expedia results
-        for i in range(3):
-            base_price = random.randint(380, 1400)
-            results.append({
-                "provider": "Expedia",
-                "airline": random.choice(airlines),
-                "flight_number": f"{random.choice(['AC', 'UA', 'DL', 'AA', 'BA'])}{random.randint(100, 999)}",
-                "origin": origin,
-                "destination": destination,
-                "departure": f"{departure_date}T{random.randint(6, 20):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "arrival": f"{departure_date}T{random.randint(10, 23):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "duration": f"{random.randint(2, 12)}h {random.randint(0, 59)}m",
-                "stops": random.randint(0, 2),
-                "cabin_class": cabin_class,
-                "price": base_price,
-                "currency": "USD",
-                "total_price": base_price * passengers,
-                "baggage": "1 carry-on included",
-                "refundable": random.choice([True, False]),
-                "booking_link": "https://expedia.com/book/..."
-            })
-        
-        # Priceline VIP Platinum results (with member discount)
-        for i in range(3):
-            base_price = random.randint(350, 1300)  # Better rates for VIP
-            vip_discount = int(base_price * 0.08)  # 8% VIP discount
-            results.append({
-                "provider": "Priceline",
-                "provider_tier": "VIP Platinum",
-                "airline": random.choice(airlines),
-                "flight_number": f"{random.choice(['AC', 'UA', 'DL', 'AA', 'BA'])}{random.randint(100, 999)}",
-                "origin": origin,
-                "destination": destination,
-                "departure": f"{departure_date}T{random.randint(6, 20):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "arrival": f"{departure_date}T{random.randint(10, 23):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "duration": f"{random.randint(2, 12)}h {random.randint(0, 59)}m",
-                "stops": random.randint(0, 2),
-                "cabin_class": cabin_class,
-                "original_price": base_price,
-                "vip_discount": vip_discount,
-                "price": base_price - vip_discount,
-                "currency": "USD",
-                "total_price": (base_price - vip_discount) * passengers,
-                "baggage": "1 carry-on, 1 checked (VIP benefit)",
-                "vip_benefits": ["Priority boarding", "Free seat selection", "Flexible cancellation"],
-                "refundable": True,
-                "booking_link": "https://priceline.com/vip/book/..."
-            })
-        
-        # Direct airline results
-        for i in range(2):
-            airline = random.choice(airlines)
-            base_price = random.randint(420, 1600)
-            results.append({
-                "provider": "Direct Airline",
-                "airline": airline,
-                "flight_number": f"{airline[:2].upper()}{random.randint(100, 999)}",
-                "origin": origin,
-                "destination": destination,
-                "departure": f"{departure_date}T{random.randint(6, 20):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "arrival": f"{departure_date}T{random.randint(10, 23):02d}:{random.choice(['00', '15', '30', '45'])}:00",
-                "duration": f"{random.randint(2, 12)}h {random.randint(0, 59)}m",
-                "stops": random.randint(0, 1),
-                "cabin_class": cabin_class,
-                "price": base_price,
-                "currency": "USD",
-                "total_price": base_price * passengers,
-                "baggage": "2 checked bags",
-                "miles_earned": random.randint(2000, 8000),
-                "refundable": random.choice([True, False]),
-                "booking_link": f"https://{airline.lower().replace(' ', '')}.com/book/..."
-            })
-        
-        # Sort by price
-        results.sort(key=lambda x: x["price"])
-        
-        # Find best deal
-        best_deal = results[0]
-        
-        logger.info(f"Flight search completed for {user_id}: {origin} -> {destination}, {len(results)} results")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_id": f"FLT-{random.randint(100000, 999999)}",
-                "search_params": {
-                    "origin": origin,
-                    "destination": destination,
-                    "departure_date": departure_date,
-                    "return_date": return_date,
-                    "passengers": passengers,
-                    "cabin_class": cabin_class
+
+        # Fetch REAL flight data from Amadeus API
+        try:
+            from app.services.amadeus_service import amadeus_service
+
+            # Map cabin class to Amadeus format
+            travel_class_map = {
+                "economy": "ECONOMY",
+                "premium_economy": "PREMIUM_ECONOMY",
+                "business": "BUSINESS",
+                "first": "FIRST"
+            }
+            travel_class = travel_class_map.get(cabin_class.lower(), "ECONOMY")
+
+            logger.info(f"Searching flights via Amadeus: {origin} → {destination} on {departure_date}")
+
+            # Search flights using Amadeus
+            amadeus_result = await amadeus_service.search_flights(
+                origin=origin.upper(),
+                destination=destination.upper(),
+                departure_date=departure_date,
+                return_date=return_date,
+                adults=passengers,
+                travel_class=travel_class,
+                max_results=15
+            )
+
+            if not amadeus_result or "data" not in amadeus_result:
+                logger.warning(f"No flights found from Amadeus for {origin} → {destination}")
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"No flights found for {origin} → {destination} on {departure_date}",
+                    error="No available flights for this route. Try different dates or airports."
+                )
+
+            # Parse Amadeus response into simplified format
+            results = []
+            for offer in amadeus_result["data"]:
+                try:
+                    # Get itinerary details
+                    itinerary = offer["itineraries"][0]  # Outbound flight
+                    first_segment = itinerary["segments"][0]
+                    last_segment = itinerary["segments"][-1]
+
+                    # Extract airline info
+                    carrier_code = first_segment["carrierCode"]
+                    airline_name = amadeus_result.get("dictionaries", {}).get("carriers", {}).get(carrier_code, carrier_code)
+
+                    # Calculate number of stops
+                    num_stops = len(itinerary["segments"]) - 1
+
+                    flight_data = {
+                        "provider": "Amadeus (Real-Time)",
+                        "airline": airline_name,
+                        "carrier_code": carrier_code,
+                        "flight_number": f"{first_segment['carrierCode']}{first_segment['number']}",
+                        "origin": first_segment["departure"]["iataCode"],
+                        "destination": last_segment["arrival"]["iataCode"],
+                        "departure": first_segment["departure"]["at"],
+                        "arrival": last_segment["arrival"]["at"],
+                        "duration": itinerary["duration"],
+                        "stops": num_stops,
+                        "cabin_class": cabin_class,
+                        "price": float(offer["price"]["total"]),
+                        "currency": offer["price"]["currency"],
+                        "base_price": float(offer["price"]["base"]),
+                        "total_price": float(offer["price"]["grandTotal"]),
+                        "bookable_seats": offer.get("numberOfBookableSeats", 0),
+                        "instant_ticketing": offer.get("instantTicketingRequired", False),
+                        "segments": itinerary["segments"],
+                        "data_source": "Amadeus API (Real-Time)"
+                    }
+
+                    # Add return flight info if available
+                    if len(offer["itineraries"]) > 1:
+                        return_itinerary = offer["itineraries"][1]
+                        flight_data["return_flight"] = {
+                            "departure": return_itinerary["segments"][0]["departure"]["at"],
+                            "arrival": return_itinerary["segments"][-1]["arrival"]["at"],
+                            "duration": return_itinerary["duration"]
+                        }
+
+                    results.append(flight_data)
+                except Exception as e:
+                    logger.error(f"Error parsing flight offer: {e}")
+                    continue
+
+            if not results:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message="No valid flight offers found",
+                    error="Failed to parse flight data"
+                )
+
+            # Sort by price
+            results.sort(key=lambda x: x["price"])
+
+            # Find best deal
+            best_deal = results[0]
+
+            logger.info(f"Found {len(results)} real flights from Amadeus for {origin} → {destination}")
+
+            return ToolResult(
+                success=True,
+                data={
+                    "search_id": f"FLT-{random.randint(100000, 999999)}",
+                    "search_params": {
+                        "origin": origin,
+                        "destination": destination,
+                        "departure_date": departure_date,
+                        "return_date": return_date,
+                        "passengers": passengers,
+                        "cabin_class": cabin_class
+                    },
+                    "results": results,
+                    "total_results": len(results),
+                    "best_deal": best_deal,
+                    "price_range": {
+                        "min": results[0]["price"],
+                        "max": results[-1]["price"],
+                        "currency": results[0]["currency"]
+                    },
+                    "searched_at": datetime.now().isoformat(),
+                    "data_source": "Amadeus API (Real-Time)"
                 },
-                "results": results,
-                "total_results": len(results),
-                "best_deal": best_deal,
-                "price_range": {
-                    "min": results[0]["price"],
-                    "max": results[-1]["price"]
-                },
-                "searched_at": datetime.now().isoformat()
-            },
-            message=f"Found {len(results)} flights. Best price: ${best_deal['price']} on {best_deal['provider']}"
-        )
+                message=f"Found {len(results)} real-time flights from Amadeus. Best price: ${best_deal['price']:.2f} {best_deal['currency']} on {best_deal['airline']}",
+                metadata={"disclaimer": "Real-time flight data from Amadeus Travel API"}
+            )
+
+        except Exception as e:
+            logger.error(f"Error searching flights via Amadeus: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Failed to search flights: {str(e)}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {

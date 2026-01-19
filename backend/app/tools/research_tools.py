@@ -43,6 +43,191 @@ class DocumentType(str, Enum):
 # LEGAL RESEARCH TOOLS
 # ============================================
 
+class GetLegalCaseDetailsTool(BaseTool):
+    """Get detailed information about a specific legal case."""
+
+    def __init__(self):
+        super().__init__(
+            name="get_legal_case_details",
+            description="Get detailed information about a specific US legal case including full opinion text if available",
+            category=ToolCategory.RESEARCH
+        )
+
+    async def execute(
+        self,
+        user_id: str,
+        parameters: Dict[str, Any],
+        permissions: Optional[Dict[str, bool]] = None
+    ) -> ToolResult:
+        if not self.check_permission("research_read", permissions):
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Permission denied",
+                error="User does not have research_read permission"
+            )
+
+        opinion_id = parameters.get("opinion_id")
+
+        if not opinion_id:
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Missing opinion ID",
+                error="Opinion ID is required"
+            )
+
+        try:
+            from app.services.courtlistener_service import courtlistener_service
+
+            logger.info(f"Fetching case details for opinion ID: {opinion_id}")
+
+            # Get case details from CourtListener - REAL API CALL
+            case_details = await courtlistener_service.get_case_details(opinion_id)
+
+            if not case_details.get("success"):
+                error_msg = case_details.get("error", "Unknown error")
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"Failed to get case details: {error_msg}",
+                    error=error_msg
+                )
+
+            logger.info(f"Case details retrieved for {user_id}")
+
+            return ToolResult(
+                success=True,
+                data=case_details,
+                message=f"Retrieved case details for opinion ID {opinion_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get case details: {str(e)}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Failed to get case details: {str(e)}",
+                error=str(e)
+            )
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "opinion_id": {
+                        "type": "integer",
+                        "description": "CourtListener opinion ID to retrieve details for"
+                    }
+                },
+                "required": ["opinion_id"]
+            }
+        }
+
+
+class SearchLegalDocketsTool(BaseTool):
+    """Search court dockets (case records and filings)."""
+
+    def __init__(self):
+        super().__init__(
+            name="search_legal_dockets",
+            description="Search court dockets to find case records, filings, and procedural history",
+            category=ToolCategory.RESEARCH
+        )
+
+    async def execute(
+        self,
+        user_id: str,
+        parameters: Dict[str, Any],
+        permissions: Optional[Dict[str, bool]] = None
+    ) -> ToolResult:
+        if not self.check_permission("research_read", permissions):
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Permission denied",
+                error="User does not have research_read permission"
+            )
+
+        query = parameters.get("query")
+        court = parameters.get("court")
+        limit = parameters.get("limit", 10)
+
+        if not query:
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Missing query",
+                error="Search query is required"
+            )
+
+        try:
+            from app.services.courtlistener_service import courtlistener_service
+
+            logger.info(f"Searching dockets: query='{query}', court={court}")
+
+            # Search dockets using CourtListener - REAL API CALL
+            docket_result = await courtlistener_service.search_dockets(
+                query=query,
+                court=court,
+                limit=min(limit, 20)
+            )
+
+            if not docket_result.get("success"):
+                error_msg = docket_result.get("error", "Unknown error")
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"Failed to search dockets: {error_msg}",
+                    error=error_msg
+                )
+
+            logger.info(f"Docket search completed for {user_id}: Found {len(docket_result.get('dockets', []))} dockets")
+
+            return ToolResult(
+                success=True,
+                data=docket_result,
+                message=f"Found {docket_result.get('total_results', 0)} total dockets, returning {docket_result.get('results_returned', 0)}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to search dockets: {str(e)}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Failed to search dockets: {str(e)}",
+                error=str(e)
+            )
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for docket records"
+                    },
+                    "court": {
+                        "type": "string",
+                        "description": "Specific court identifier to search"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results (1-20)",
+                        "default": 10
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+
+
 class SearchLegalCanadaTool(BaseTool):
     """Search Canadian legal resources (CanLII)."""
     
@@ -165,15 +350,15 @@ class SearchLegalCanadaTool(BaseTool):
 
 
 class SearchLegalUSTool(BaseTool):
-    """Search US legal resources (CourtListener, etc.)."""
-    
+    """Search US legal resources via CourtListener API - REAL DATA."""
+
     def __init__(self):
         super().__init__(
             name="search_legal_us",
-            description="Search US legal cases, statutes, and regulations via CourtListener and other sources",
+            description="Search US legal cases, statutes, and regulations via CourtListener API with real-time data from millions of court opinions",
             category=ToolCategory.RESEARCH
         )
-    
+
     async def execute(
         self,
         user_id: str,
@@ -187,11 +372,14 @@ class SearchLegalUSTool(BaseTool):
                 message="Permission denied",
                 error="User does not have research_read permission"
             )
-        
+
         query = parameters.get("query")
         jurisdiction = parameters.get("jurisdiction", "federal")  # federal, state (NY, CA, TX, etc.)
-        court_level = parameters.get("court_level")  # supreme, appeals, district
-        
+        court = parameters.get("court")  # scotus, ca9, nysd, etc.
+        date_filed_after = parameters.get("date_filed_after")
+        date_filed_before = parameters.get("date_filed_before")
+        limit = parameters.get("limit", 10)
+
         if not query:
             return ToolResult(
                 success=False,
@@ -199,58 +387,82 @@ class SearchLegalUSTool(BaseTool):
                 message="Missing query",
                 error="Search query is required"
             )
-        
-        # STUBBED: Mock US legal search results
-        federal_courts = ["U.S. Supreme Court", "U.S. Court of Appeals", "U.S. District Court"]
-        state_courts = ["NY Court of Appeals", "CA Supreme Court", "TX Supreme Court"]
-        
-        results = []
-        
-        # Case law results
-        for i in range(5):
-            year = random.randint(2015, 2024)
-            is_federal = jurisdiction == "federal"
-            results.append({
-                "type": "case",
-                "title": f"{random.choice(['Smith', 'Johnson', 'Williams'])} v. {random.choice(['United States', 'State', 'Corp.', 'Inc.'])}",
-                "citation": f"{random.randint(500, 600)} U.S. {random.randint(1, 999)}" if is_federal else f"{random.randint(1, 100)} N.Y.3d {random.randint(1, 500)}",
-                "court": random.choice(federal_courts if is_federal else state_courts),
-                "date": f"{year}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "jurisdiction": jurisdiction.upper(),
-                "summary": f"Case addressing {query}. The court examined issues of {random.choice(['constitutional law', 'federal procedure', 'corporate governance', 'civil rights'])}.",
-                "relevance_score": round(random.uniform(0.7, 0.99), 2),
-                "url": f"https://courtlistener.com/opinion/{random.randint(1000000, 9999999)}/"
-            })
-        
-        # Federal statute results
-        for i in range(3):
-            results.append({
-                "type": "statute",
-                "title": f"{random.choice(['Securities Act', 'Tax Code', 'Bankruptcy Code', 'Clean Air Act'])}",
-                "section": f"§ {random.randint(1, 500)}",
-                "jurisdiction": "FEDERAL",
-                "summary": f"Federal statutory provision related to {query}.",
-                "relevance_score": round(random.uniform(0.6, 0.95), 2),
-                "url": f"https://uscode.house.gov/view.xhtml?req={random.randint(1, 1000)}"
-            })
-        
-        results.sort(key=lambda x: x["relevance_score"], reverse=True)
-        
-        logger.info(f"US legal search completed for {user_id}: {query}")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_id": f"US-LEG-{random.randint(100000, 999999)}",
-                "query": query,
-                "jurisdiction": jurisdiction,
-                "results": results,
-                "total_results": len(results),
-                "sources": ["CourtListener", "U.S. Code"],
-                "searched_at": datetime.now().isoformat()
-            },
-            message=f"Found {len(results)} US legal results for '{query}'"
-        )
+
+        try:
+            from app.services.courtlistener_service import courtlistener_service
+
+            # Map jurisdiction to court filter if needed
+            jurisdiction_map = {
+                "federal": "F",
+                "state": "S"
+            }
+            jurisdiction_filter = jurisdiction_map.get(jurisdiction.lower())
+
+            logger.info(f"Searching CourtListener API: query='{query}', court={court}, jurisdiction={jurisdiction}")
+
+            # Search cases using CourtListener - REAL API CALL
+            courtlistener_result = await courtlistener_service.search_cases(
+                query=query,
+                court=court,
+                jurisdiction=jurisdiction_filter,
+                date_filed_after=date_filed_after,
+                date_filed_before=date_filed_before,
+                limit=min(limit, 20)
+            )
+
+            if not courtlistener_result.get("success"):
+                error_msg = courtlistener_result.get("error", "Unknown error")
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"CourtListener API error: {error_msg}",
+                    error=error_msg
+                )
+
+            # Format results for AI
+            results = []
+            for case in courtlistener_result.get("cases", []):
+                results.append({
+                    "type": "case",
+                    "title": case.get("case_name", "Unknown"),
+                    "citation": ", ".join(case.get("citation", [])) if case.get("citation") else "No citation",
+                    "court": case.get("court", "Unknown"),
+                    "date": case.get("date_filed", "Unknown"),
+                    "jurisdiction": jurisdiction.upper(),
+                    "summary": case.get("snippet", "No summary available"),
+                    "docket_number": case.get("docket_number", "N/A"),
+                    "url": case.get("opinion_url", ""),
+                    "case_id": case.get("case_id", ""),
+                    "data_source": "CourtListener API (Real-Time)"
+                })
+
+            logger.info(f"US legal search completed for {user_id}: Found {len(results)} cases")
+
+            return ToolResult(
+                success=True,
+                data={
+                    "search_id": f"US-LEG-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                    "query": query,
+                    "jurisdiction": jurisdiction,
+                    "court": court,
+                    "results": results,
+                    "total_results": courtlistener_result.get("total_results", 0),
+                    "results_returned": len(results),
+                    "sources": ["CourtListener API - Millions of US Court Opinions"],
+                    "searched_at": datetime.now().isoformat(),
+                    "data_source": "CourtListener API (Real-Time)"
+                },
+                message=f"Found {courtlistener_result.get('total_results', 0)} total results, returning {len(results)} cases from CourtListener API"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to search US legal cases: {str(e)}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Failed to search US legal cases: {str(e)}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -261,18 +473,30 @@ class SearchLegalUSTool(BaseTool):
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Legal search query"
+                        "description": "Legal search query (e.g., 'habeas corpus', 'negligence', 'breach of contract')"
                     },
                     "jurisdiction": {
                         "type": "string",
-                        "enum": ["federal", "ny", "ca", "tx", "fl", "il"],
-                        "description": "US jurisdiction",
+                        "enum": ["federal", "state"],
+                        "description": "Jurisdiction to search - federal or state courts",
                         "default": "federal"
                     },
-                    "court_level": {
+                    "court": {
                         "type": "string",
-                        "enum": ["supreme", "appeals", "district", "all"],
-                        "description": "Court level to search"
+                        "description": "Specific court identifier (e.g., 'scotus' for Supreme Court, 'ca9' for Ninth Circuit, 'nysd' for Southern District of New York)"
+                    },
+                    "date_filed_after": {
+                        "type": "string",
+                        "description": "Filter cases filed after this date (YYYY-MM-DD)"
+                    },
+                    "date_filed_before": {
+                        "type": "string",
+                        "description": "Filter cases filed before this date (YYYY-MM-DD)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (1-20)",
+                        "default": 10
                     }
                 },
                 "required": ["query"]
@@ -1016,19 +1240,23 @@ class ResearchTools:
     def get_all_tools() -> list[BaseTool]:
         """Get all research tools."""
         return [
-            # Legal Research
+            # Legal Research (US - CourtListener API)
+            SearchLegalUSTool(),  # Search cases with real-time CourtListener data
+            GetLegalCaseDetailsTool(),  # Get detailed case information
+            SearchLegalDocketsTool(),  # Search court dockets and filings
+
+            # Legal Research (Canada - CanLII)
             SearchLegalCanadaTool(),
-            SearchLegalUSTool(),
-            
+
             # Project Management
             CreateResearchProjectTool(),
             ListResearchProjectsTool(),
-            
+
             # Document Management
             SaveDocumentTool(),
             ListDocumentsTool(),
             GetDocumentHistoryTool(),
-            
+
             # General Research
             ConductResearchTool(),
             GenerateResearchReportTool()

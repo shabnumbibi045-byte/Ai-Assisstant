@@ -42,41 +42,166 @@ const Stocks = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTimeframe, setSelectedTimeframe] = useState('1D');
 
-  // Mock portfolio data
-  const portfolio = [
-    { symbol: 'AAPL', name: 'Apple Inc.', shares: 50, avgPrice: 168.50, currentPrice: 182.63, change: 1.23 },
-    { symbol: 'GOOGL', name: 'Alphabet Inc.', shares: 20, avgPrice: 125.00, currentPrice: 141.80, change: -0.45 },
-    { symbol: 'MSFT', name: 'Microsoft Corp.', shares: 35, avgPrice: 310.00, currentPrice: 397.58, change: 0.89 },
-    { symbol: 'AMZN', name: 'Amazon.com Inc.', shares: 25, avgPrice: 145.00, currentPrice: 185.07, change: 2.15 },
-    { symbol: 'NVDA', name: 'NVIDIA Corp.', shares: 15, avgPrice: 450.00, currentPrice: 682.23, change: 3.45 },
-    { symbol: 'TSLA', name: 'Tesla Inc.', shares: 30, avgPrice: 225.00, currentPrice: 207.83, change: -1.87 },
-  ];
+  // Real-time portfolio data (with user's holdings)
+  const [portfolio, setPortfolio] = useState([
+    { symbol: 'AAPL', name: 'Apple Inc.', shares: 50, avgPrice: 168.50, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', shares: 20, avgPrice: 125.00, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+    { symbol: 'MSFT', name: 'Microsoft Corp.', shares: 35, avgPrice: 310.00, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+    { symbol: 'AMZN', name: 'Amazon.com Inc.', shares: 25, avgPrice: 145.00, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+    { symbol: 'NVDA', name: 'NVIDIA Corp.', shares: 15, avgPrice: 450.00, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+    { symbol: 'TSLA', name: 'Tesla Inc.', shares: 30, avgPrice: 225.00, currentPrice: 0, change: 0, isLoading: true, latest_trading_day: null },
+  ]);
 
-  const watchlist = [
-    { symbol: 'META', name: 'Meta Platforms', price: 474.99, change: 2.34 },
-    { symbol: 'NFLX', name: 'Netflix Inc.', price: 561.77, change: -0.78 },
-    { symbol: 'AMD', name: 'AMD Inc.', price: 177.55, change: 1.56 },
-    { symbol: 'CRM', name: 'Salesforce', price: 290.84, change: 0.92 },
-  ];
+  const [watchlist, setWatchlist] = useState([
+    { symbol: 'META', name: 'Meta Platforms', price: 0, change: 0, isLoading: true },
+    { symbol: 'NFLX', name: 'Netflix Inc.', price: 0, change: 0, isLoading: true },
+    { symbol: 'AMD', name: 'AMD Inc.', price: 0, change: 0, isLoading: true },
+    { symbol: 'CRM', name: 'Salesforce', price: 0, change: 0, isLoading: true },
+  ]);
 
-  const priceAlerts = [
-    { symbol: 'AAPL', condition: 'above', targetPrice: 190.00, currentPrice: 182.63, active: true },
-    { symbol: 'TSLA', condition: 'below', targetPrice: 200.00, currentPrice: 207.83, active: true },
-    { symbol: 'NVDA', condition: 'above', targetPrice: 700.00, currentPrice: 682.23, active: true },
-  ];
+  const [priceAlerts, setPriceAlerts] = useState([
+    { symbol: 'AAPL', condition: 'above', targetPrice: 190.00, currentPrice: 0, active: true },
+    { symbol: 'TSLA', condition: 'below', targetPrice: 200.00, currentPrice: 0, active: true },
+    { symbol: 'NVDA', condition: 'above', targetPrice: 700.00, currentPrice: 0, active: true },
+  ]);
 
+  // API base URL from environment or default
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+
+  // Fetch real-time stock quote from backend
+  const fetchStockQuote = async (symbol) => {
+    try {
+      const token = localStorage.getItem('access_token');
+
+      if (!token) {
+        return null;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/stocks/quote/${symbol}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  // Load real-time data for all stocks
+  useEffect(() => {
+    const loadRealTimeData = async () => {
+      // Update portfolio with real prices
+      const updatedPortfolio = await Promise.all(
+        portfolio.map(async (stock) => {
+          const quote = await fetchStockQuote(stock.symbol);
+
+          if (quote) {
+            return {
+              ...stock,
+              name: quote.company_name || stock.name,
+              currentPrice: quote.price,
+              change: quote.change_percent,
+              latest_trading_day: quote.latest_trading_day || null,
+              isLoading: false,
+            };
+          }
+          return { ...stock, isLoading: false };
+        })
+      );
+      setPortfolio(updatedPortfolio);
+
+      // Update watchlist with real prices
+      const updatedWatchlist = await Promise.all(
+        watchlist.map(async (stock) => {
+          const quote = await fetchStockQuote(stock.symbol);
+          if (quote) {
+            return {
+              ...stock,
+              name: quote.company_name || stock.name,
+              price: quote.price,
+              change: quote.change_percent,
+              isLoading: false,
+            };
+          }
+          return { ...stock, isLoading: false };
+        })
+      );
+      setWatchlist(updatedWatchlist);
+
+      // Update price alerts with real prices
+      const updatedAlerts = await Promise.all(
+        priceAlerts.map(async (alert) => {
+          const quote = await fetchStockQuote(alert.symbol);
+          if (quote) {
+            return {
+              ...alert,
+              currentPrice: quote.price,
+            };
+          }
+          return alert;
+        })
+      );
+      setPriceAlerts(updatedAlerts);
+    };
+
+    loadRealTimeData();
+  }, []); // Load on mount
+
+  // Calculate real-time portfolio metrics
   const totalValue = portfolio.reduce((sum, stock) => sum + (stock.shares * stock.currentPrice), 0);
   const totalCost = portfolio.reduce((sum, stock) => sum + (stock.shares * stock.avgPrice), 0);
   const totalGain = totalValue - totalCost;
   const totalGainPercent = ((totalGain / totalCost) * 100).toFixed(2);
 
-  // Chart data
+  // Calculate today's gain (sum of all day changes × shares)
+  const todaysGain = portfolio.reduce((sum, stock) => {
+    if (stock.isLoading || !stock.change) return sum;
+    const dayChange = (stock.change / 100) * stock.currentPrice * stock.shares;
+    return sum + dayChange;
+  }, 0);
+  const todaysGainPercent = totalValue > 0 ? ((todaysGain / (totalValue - todaysGain)) * 100).toFixed(2) : 0;
+
+  // Find best performer (by % gain from avg price)
+  const bestPerformer = portfolio.reduce((best, stock) => {
+    if (stock.isLoading || stock.currentPrice === 0) return best;
+    const gainPercent = ((stock.currentPrice - stock.avgPrice) / stock.avgPrice) * 100;
+    if (!best || gainPercent > best.gainPercent) {
+      return { symbol: stock.symbol, gainPercent };
+    }
+    return best;
+  }, null);
+
+  // Chart data - simulated intraday values based on current portfolio value
+  // In production, this would come from historical API data
+  const generateIntraDayData = () => {
+    const baseValue = totalValue;
+    const variancePercent = 0.02; // 2% variance
+    const points = 14;
+    const data = [];
+
+    for (let i = 0; i < points; i++) {
+      const randomVariance = (Math.random() - 0.5) * variancePercent * baseValue;
+      const trendEffect = (i / points) * (todaysGain * 0.7); // Trend towards today's gain
+      data.push(baseValue - todaysGain + trendEffect + randomVariance);
+    }
+    data.push(baseValue); // End with current value
+    return data;
+  };
+
   const chartData = {
     labels: ['9:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00'],
     datasets: [
       {
         label: 'Portfolio Value',
-        data: [155000, 156200, 155800, 157300, 158100, 157600, 158900, 159500, 158800, 160200, 161000, 160500, 161800, 162350],
+        data: totalValue > 0 ? generateIntraDayData() : Array(14).fill(0),
         fill: true,
         borderColor: '#7c3aed',
         backgroundColor: 'rgba(124, 58, 237, 0.1)',
@@ -120,8 +245,64 @@ const Stocks = () => {
 
   const handleRefresh = async () => {
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    toast.success('Stock data refreshed');
+
+    try {
+      // Refresh portfolio prices
+      const updatedPortfolio = await Promise.all(
+        portfolio.map(async (stock) => {
+          const quote = await fetchStockQuote(stock.symbol);
+          if (quote) {
+            return {
+              ...stock,
+              name: quote.company_name || stock.name,
+              currentPrice: quote.price,
+              change: quote.change_percent,
+              latest_trading_day: quote.latest_trading_day || stock.latest_trading_day,
+            };
+          }
+          return stock;
+        })
+      );
+      setPortfolio(updatedPortfolio);
+
+      // Refresh watchlist prices
+      const updatedWatchlist = await Promise.all(
+        watchlist.map(async (stock) => {
+          const quote = await fetchStockQuote(stock.symbol);
+          if (quote) {
+            return {
+              ...stock,
+              name: quote.company_name || stock.name,
+              price: quote.price,
+              change: quote.change_percent,
+            };
+          }
+          return stock;
+        })
+      );
+      setWatchlist(updatedWatchlist);
+
+      // Refresh alerts
+      const updatedAlerts = await Promise.all(
+        priceAlerts.map(async (alert) => {
+          const quote = await fetchStockQuote(alert.symbol);
+          if (quote) {
+            return {
+              ...alert,
+              currentPrice: quote.price,
+            };
+          }
+          return alert;
+        })
+      );
+      setPriceAlerts(updatedAlerts);
+
+      toast.success('Real-time stock data refreshed from Alpha Vantage');
+    } catch (error) {
+      console.error('Error refreshing stock data:', error);
+      toast.error('Failed to refresh stock data');
+    }
+
     setIsLoading(false);
   };
 
@@ -132,6 +313,20 @@ const Stocks = () => {
         <div>
           <h1 className="text-2xl font-display font-bold text-white">Stocks</h1>
           <p className="text-slate-400">Track your portfolio and market trends</p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-2">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+              <span className="text-xs text-emerald-400">Real-time data from Alpha Vantage API</span>
+            </div>
+            {portfolio.length > 0 && portfolio[0].latest_trading_day && (
+              <span className="text-xs text-slate-500">
+                • Trading Day: {portfolio[0].latest_trading_day}
+              </span>
+            )}
+            <span className="text-xs text-slate-500">
+              • Last Updated: {new Date().toLocaleTimeString()}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -162,7 +357,11 @@ const Stocks = () => {
             </div>
             <span className="text-slate-400">Portfolio Value</span>
           </div>
-          <p className="text-3xl font-bold text-white">${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+          {portfolio[0]?.isLoading ? (
+            <div className="animate-pulse bg-slate-700 h-9 w-40 rounded"></div>
+          ) : (
+            <p className="text-3xl font-bold text-white">${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          )}
           <p className={`text-sm mt-2 flex items-center gap-1 ${totalGain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {totalGain >= 0 ? <HiTrendingUp className="w-4 h-4" /> : <HiTrendingDown className="w-4 h-4" />}
             {totalGain >= 0 ? '+' : ''}{totalGainPercent}% all time
@@ -176,15 +375,25 @@ const Stocks = () => {
           className="card"
         >
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-              <HiTrendingUp className="w-5 h-5 text-emerald-400" />
+            <div className={`w-10 h-10 rounded-lg ${todaysGain >= 0 ? 'bg-emerald-500/20' : 'bg-red-500/20'} flex items-center justify-center`}>
+              {todaysGain >= 0 ? (
+                <HiTrendingUp className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <HiTrendingDown className="w-5 h-5 text-red-400" />
+              )}
             </div>
-            <span className="text-slate-400">Today's Gain</span>
+            <span className="text-slate-400">Today's Change</span>
           </div>
-          <p className="text-3xl font-bold text-emerald-400">+$1,847.50</p>
-          <p className="text-sm text-emerald-400 mt-2 flex items-center gap-1">
-            <HiTrendingUp className="w-4 h-4" />
-            +1.15%
+          {portfolio[0]?.isLoading ? (
+            <div className="animate-pulse bg-slate-700 h-9 w-32 rounded"></div>
+          ) : (
+            <p className={`text-3xl font-bold ${todaysGain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {todaysGain >= 0 ? '+' : ''}${Math.abs(todaysGain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          )}
+          <p className={`text-sm mt-2 flex items-center gap-1 ${todaysGain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {todaysGain >= 0 ? <HiTrendingUp className="w-4 h-4" /> : <HiTrendingDown className="w-4 h-4" />}
+            {todaysGain >= 0 ? '+' : ''}{todaysGainPercent}%
           </p>
         </motion.div>
 
@@ -200,11 +409,17 @@ const Stocks = () => {
             </div>
             <span className="text-slate-400">Best Performer</span>
           </div>
-          <p className="text-2xl font-bold text-white">NVDA</p>
-          <p className="text-sm text-emerald-400 mt-2 flex items-center gap-1">
-            <HiTrendingUp className="w-4 h-4" />
-            +51.6% gain
-          </p>
+          {portfolio[0]?.isLoading || !bestPerformer ? (
+            <div className="animate-pulse bg-slate-700 h-8 w-24 rounded"></div>
+          ) : (
+            <>
+              <p className="text-2xl font-bold text-white">{bestPerformer.symbol}</p>
+              <p className={`text-sm mt-2 flex items-center gap-1 ${bestPerformer.gainPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {bestPerformer.gainPercent >= 0 ? <HiTrendingUp className="w-4 h-4" /> : <HiTrendingDown className="w-4 h-4" />}
+                {bestPerformer.gainPercent >= 0 ? '+' : ''}{bestPerformer.gainPercent.toFixed(2)}% gain
+              </p>
+            </>
+          )}
         </motion.div>
 
         <motion.div
@@ -317,13 +532,33 @@ const Stocks = () => {
                       </td>
                       <td className="py-4 px-4 text-right text-slate-300">{stock.shares}</td>
                       <td className="py-4 px-4 text-right text-slate-300">${stock.avgPrice.toFixed(2)}</td>
-                      <td className="py-4 px-4 text-right text-white font-medium">${stock.currentPrice.toFixed(2)}</td>
-                      <td className={`py-4 px-4 text-right ${stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {stock.change >= 0 ? '+' : ''}{stock.change}%
+                      <td className="py-4 px-4 text-right text-white font-medium">
+                        {stock.isLoading ? (
+                          <div className="animate-pulse bg-slate-700 h-6 w-20 rounded inline-block"></div>
+                        ) : (
+                          `$${stock.currentPrice.toFixed(2)}`
+                        )}
                       </td>
-                      <td className="py-4 px-4 text-right text-white font-medium">${value.toLocaleString()}</td>
+                      <td className={`py-4 px-4 text-right ${stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {stock.isLoading ? (
+                          <div className="animate-pulse bg-slate-700 h-6 w-16 rounded inline-block"></div>
+                        ) : (
+                          `${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(2)}%`
+                        )}
+                      </td>
+                      <td className="py-4 px-4 text-right text-white font-medium">
+                        {stock.isLoading ? (
+                          <div className="animate-pulse bg-slate-700 h-6 w-24 rounded inline-block"></div>
+                        ) : (
+                          `$${value.toLocaleString()}`
+                        )}
+                      </td>
                       <td className={`py-4 px-4 text-right font-medium ${gain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {gain >= 0 ? '+' : ''}${gain.toLocaleString()} ({gainPercent}%)
+                        {stock.isLoading ? (
+                          <div className="animate-pulse bg-slate-700 h-6 w-28 rounded inline-block"></div>
+                        ) : (
+                          `${gain >= 0 ? '+' : ''}$${gain.toLocaleString()} (${gainPercent}%)`
+                        )}
                       </td>
                     </motion.tr>
                   );
@@ -370,10 +605,19 @@ const Stocks = () => {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-white">${stock.price.toFixed(2)}</p>
-                  <p className={`text-sm ${stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {stock.change >= 0 ? '+' : ''}{stock.change}%
-                  </p>
+                  {stock.isLoading ? (
+                    <>
+                      <div className="animate-pulse bg-slate-700 h-7 w-24 rounded mb-2"></div>
+                      <div className="animate-pulse bg-slate-700 h-5 w-16 rounded"></div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xl font-bold text-white">${stock.price.toFixed(2)}</p>
+                      <p className={`text-sm ${stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)}%
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="mt-4 flex gap-2">

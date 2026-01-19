@@ -23,6 +23,7 @@ venv/
 .venv/
 ENV/
 
+
 # Node
 node_modules/
 npm-debug.log*
@@ -55,3 +56,6 @@ frontend/build/
 
 # Vercel
 .vercel/
+
+# claude
+.claude/

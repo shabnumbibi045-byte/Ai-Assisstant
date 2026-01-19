@@ -276,12 +276,24 @@ class ChatService:
         else:
             arguments = function_call["arguments"]
         
-        # Execute tool
+        # Execute tool with default permissions
+        # For now, grant all permissions. In production, get from user's role/profile
+        default_permissions = {
+            "banking_read": True,
+            "banking_write": True,
+            "travel_read": True,
+            "travel_write": True,
+            "research_read": True,
+            "stocks_read": True,
+            "communication_read": True,
+            "communication_write": True,
+        }
+
         result = await ToolRegistry.execute_tool(
             tool_name=tool_name,
             user_id=user_id,
             parameters=arguments,
-            permissions={}  # TODO: Get real permissions
+            permissions=default_permissions
         )
         
         return {

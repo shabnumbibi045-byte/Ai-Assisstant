@@ -67,93 +67,77 @@ class ListBankAccountsTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
+
         country_filter = parameters.get("country")  # Optional filter
-        
-        # STUBBED: Mock multi-country accounts
-        mock_accounts = [
-            {
-                "account_id": "acc_ca_001",
-                "institution": "TD Canada Trust",
-                "country": "CA",
-                "currency": "CAD",
-                "account_type": "checking",
-                "account_name": "TD Chequing",
-                "last_four": "5678",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            },
-            {
-                "account_id": "acc_ca_002",
-                "institution": "RBC Royal Bank",
-                "country": "CA",
-                "currency": "CAD",
-                "account_type": "business",
-                "account_name": "RBC Business Account",
-                "last_four": "9012",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            },
-            {
-                "account_id": "acc_us_001",
-                "institution": "Chase Bank",
-                "country": "US",
-                "currency": "USD",
-                "account_type": "checking",
-                "account_name": "Chase Total Checking",
-                "last_four": "3456",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            },
-            {
-                "account_id": "acc_us_002",
-                "institution": "Bank of America",
-                "country": "US",
-                "currency": "USD",
-                "account_type": "savings",
-                "account_name": "BoA Savings",
-                "last_four": "7890",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            },
-            {
-                "account_id": "acc_ke_001",
-                "institution": "Kenya Commercial Bank",
-                "country": "KE",
-                "currency": "KES",
-                "account_type": "checking",
-                "account_name": "KCB Current Account",
-                "last_four": "2345",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            },
-            {
-                "account_id": "acc_ke_002",
-                "institution": "Equity Bank Kenya",
-                "country": "KE",
-                "currency": "KES",
-                "account_type": "business",
-                "account_name": "Equity Business",
-                "last_four": "6789",
-                "status": "active",
-                "last_synced": datetime.now().isoformat()
-            }
-        ]
-        
-        # Filter by country if specified
-        if country_filter:
-            mock_accounts = [acc for acc in mock_accounts if acc["country"] == country_filter]
-        
-        logger.info(f"Listed {len(mock_accounts)} bank accounts for {user_id}")
-        
+
+        # Try to get real Plaid data first
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
+                )
+                plaid_account = result.scalar_one_or_none()
+
+                if plaid_account:
+                    # Fetch real accounts from Plaid
+                    logger.info(f"Fetching real Plaid data for user {user_id}")
+                    accounts_data = await plaid_service.get_accounts(plaid_account.access_token)
+
+                    # Format Plaid accounts
+                    real_accounts = []
+                    for account in accounts_data.get('accounts', []):
+                        real_accounts.append({
+                            "account_id": account['account_id'],
+                            "institution": plaid_account.institution_name or "Connected Bank",
+                            "country": "US",  # Plaid doesn't directly provide country
+                            "currency": account['balance'].get('currency', 'USD'),
+                            "account_type": account['subtype'],
+                            "account_name": account['name'],
+                            "last_four": account.get('mask', 'XXXX'),
+                            "status": "active",
+                            "last_synced": datetime.now().isoformat(),
+                            "balance": account['balance'].get('current', 0),
+                            "available_balance": account['balance'].get('available', 0)
+                        })
+
+                    logger.info(f"Retrieved {len(real_accounts)} real accounts from Plaid")
+
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "accounts": real_accounts,
+                            "total_count": len(real_accounts),
+                            "countries": list(set(acc["country"] for acc in real_accounts)),
+                            "data_source": "plaid",
+                            "has_connected_bank": True
+                        },
+                        message=f"Found {len(real_accounts)} connected bank accounts (Real Data)"
+                    )
+        except Exception as e:
+            logger.warning(f"Could not fetch Plaid data: {e}. Falling back to no accounts.")
+
+        # No Plaid connection - return empty with instruction
+        logger.info(f"No bank accounts connected for user {user_id}")
+
         return ToolResult(
-            success=True,
+            success=False,
             data={
-                "accounts": mock_accounts,
-                "total_count": len(mock_accounts),
-                "countries": list(set(acc["country"] for acc in mock_accounts))
+                "accounts": [],
+                "total_count": 0,
+                "countries": [],
+                "data_source": "none",
+                "has_connected_bank": False
             },
-            message=f"Found {len(mock_accounts)} connected bank accounts"
+            message="No bank accounts connected. Please connect your bank account first using Plaid to access banking features.",
+            error="NO_BANK_CONNECTED"
         )
     
     def get_schema(self) -> Dict[str, Any]:
@@ -276,109 +260,75 @@ class GetBalanceTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
-        account_id = parameters.get("account_id")  # Specific account
-        country = parameters.get("country")  # Filter by country
-        
-        # STUBBED: Mock balances with multi-currency support
-        mock_balances = {
-            "acc_ca_001": {
-                "account_id": "acc_ca_001",
-                "institution": "TD Canada Trust",
-                "account_name": "TD Chequing",
-                "country": "CA",
-                "currency": "CAD",
-                "current_balance": 12450.75,
-                "available_balance": 12450.75,
-                "as_of": datetime.now().isoformat()
-            },
-            "acc_ca_002": {
-                "account_id": "acc_ca_002",
-                "institution": "RBC Royal Bank",
-                "account_name": "RBC Business Account",
-                "country": "CA",
-                "currency": "CAD",
-                "current_balance": 45230.50,
-                "available_balance": 45230.50,
-                "as_of": datetime.now().isoformat()
-            },
-            "acc_us_001": {
-                "account_id": "acc_us_001",
-                "institution": "Chase Bank",
-                "account_name": "Chase Total Checking",
-                "country": "US",
-                "currency": "USD",
-                "current_balance": 8750.25,
-                "available_balance": 8750.25,
-                "as_of": datetime.now().isoformat()
-            },
-            "acc_us_002": {
-                "account_id": "acc_us_002",
-                "institution": "Bank of America",
-                "account_name": "BoA Savings",
-                "country": "US",
-                "currency": "USD",
-                "current_balance": 25000.00,
-                "available_balance": 25000.00,
-                "as_of": datetime.now().isoformat()
-            },
-            "acc_ke_001": {
-                "account_id": "acc_ke_001",
-                "institution": "Kenya Commercial Bank",
-                "account_name": "KCB Current Account",
-                "country": "KE",
-                "currency": "KES",
-                "current_balance": 1250000.00,
-                "available_balance": 1250000.00,
-                "as_of": datetime.now().isoformat()
-            },
-            "acc_ke_002": {
-                "account_id": "acc_ke_002",
-                "institution": "Equity Bank Kenya",
-                "account_name": "Equity Business",
-                "country": "KE",
-                "currency": "KES",
-                "current_balance": 3500000.00,
-                "available_balance": 3500000.00,
-                "as_of": datetime.now().isoformat()
-            }
-        }
-        
-        # Filter results
-        if account_id:
-            if account_id in mock_balances:
-                balances = [mock_balances[account_id]]
-            else:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    message="Account not found",
-                    error=f"Account '{account_id}' not found"
+
+        # Check if user has Plaid connection
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
                 )
-        else:
-            balances = list(mock_balances.values())
-            if country:
-                balances = [b for b in balances if b["country"] == country]
-        
-        # Calculate totals by currency
-        totals_by_currency = {}
-        for bal in balances:
-            curr = bal["currency"]
-            if curr not in totals_by_currency:
-                totals_by_currency[curr] = 0
-            totals_by_currency[curr] += bal["current_balance"]
-        
-        logger.info(f"Balance retrieved for {user_id}: {len(balances)} accounts")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "balances": balances,
-                "totals_by_currency": totals_by_currency,
-                "account_count": len(balances)
-            },
-            message=f"Retrieved balances for {len(balances)} accounts"
-        )
+                plaid_account = result.scalar_one_or_none()
+
+                if not plaid_account:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        message="No bank accounts connected. Please connect your bank account first.",
+                        error="NO_BANK_CONNECTED"
+                    )
+
+                # Fetch real balance from Plaid
+                accounts_data = await plaid_service.get_accounts(plaid_account.access_token)
+
+                balances = []
+                for account in accounts_data.get('accounts', []):
+                    balances.append({
+                        "account_id": account['account_id'],
+                        "institution": plaid_account.institution_name or "Connected Bank",
+                        "account_name": account['name'],
+                        "country": "US",
+                        "currency": account['balance'].get('currency', 'USD'),
+                        "current_balance": account['balance'].get('current', 0),
+                        "available_balance": account['balance'].get('available', 0),
+                        "as_of": datetime.now().isoformat()
+                    })
+
+                # Calculate totals by currency
+                totals_by_currency = {}
+                for bal in balances:
+                    curr = bal["currency"]
+                    if curr not in totals_by_currency:
+                        totals_by_currency[curr] = 0
+                    totals_by_currency[curr] += bal["current_balance"]
+
+                logger.info(f"Balance retrieved for {user_id}: {len(balances)} accounts (Real Data)")
+
+                return ToolResult(
+                    success=True,
+                    data={
+                        "balances": balances,
+                        "totals_by_currency": totals_by_currency,
+                        "account_count": len(balances),
+                        "data_source": "plaid"
+                    },
+                    message=f"Retrieved balances for {len(balances)} accounts (Real Data)"
+                )
+        except Exception as e:
+            logger.error(f"Error fetching balance: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to fetch account balances. Please ensure your bank account is connected.",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -404,14 +354,14 @@ class GetBalanceTool(BaseTool):
 
 class GetDailyBalanceSummaryTool(BaseTool):
     """Get daily balance summary across all accounts."""
-    
+
     def __init__(self):
         super().__init__(
             name="get_daily_balance_summary",
-            description="Get comprehensive daily balance summary across all accounts in Canada, US, and Kenya",
+            description="Get comprehensive daily balance summary across all connected bank accounts",
             category=ToolCategory.BANKING
         )
-    
+
     async def execute(
         self,
         user_id: str,
@@ -425,58 +375,76 @@ class GetDailyBalanceSummaryTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
+
         date = parameters.get("date", datetime.now().strftime("%Y-%m-%d"))
-        
-        # STUBBED: Mock daily summary
-        summary = {
-            "date": date,
-            "generated_at": datetime.now().isoformat(),
-            "by_country": {
-                "CA": {
-                    "currency": "CAD",
-                    "total_balance": 57681.25,
-                    "accounts": [
-                        {"name": "TD Chequing", "balance": 12450.75},
-                        {"name": "RBC Business Account", "balance": 45230.50}
-                    ],
-                    "daily_change": 1250.00,
-                    "change_percent": 2.21
-                },
-                "US": {
-                    "currency": "USD",
-                    "total_balance": 33750.25,
-                    "accounts": [
-                        {"name": "Chase Total Checking", "balance": 8750.25},
-                        {"name": "BoA Savings", "balance": 25000.00}
-                    ],
-                    "daily_change": -500.00,
-                    "change_percent": -1.46
-                },
-                "KE": {
-                    "currency": "KES",
-                    "total_balance": 4750000.00,
-                    "accounts": [
-                        {"name": "KCB Current Account", "balance": 1250000.00},
-                        {"name": "Equity Business", "balance": 3500000.00}
-                    ],
-                    "daily_change": 150000.00,
-                    "change_percent": 3.26
+
+        # Check if user has Plaid connection
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
+                )
+                plaid_account = result.scalar_one_or_none()
+
+                if not plaid_account:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        message="No bank accounts connected. Please connect your bank account first.",
+                        error="NO_BANK_CONNECTED"
+                    )
+
+                # Fetch real account balances from Plaid
+                accounts_data = await plaid_service.get_accounts(plaid_account.access_token)
+                accounts = accounts_data.get('accounts', [])
+
+                # Calculate summary
+                total_balance = sum(acc['balance'].get('current', 0) for acc in accounts)
+                total_available = sum(acc['balance'].get('available', 0) for acc in accounts if acc['balance'].get('available') is not None)
+
+                account_list = []
+                for account in accounts:
+                    account_list.append({
+                        "name": account['name'],
+                        "balance": account['balance'].get('current', 0),
+                        "available": account['balance'].get('available'),
+                        "type": account.get('subtype', account.get('type'))
+                    })
+
+                summary = {
+                    "date": date,
+                    "generated_at": datetime.now().isoformat(),
+                    "total_balance": total_balance,
+                    "total_available": total_available,
+                    "currency": accounts[0]['balance'].get('currency', 'USD') if accounts else 'USD',
+                    "accounts": account_list,
+                    "account_count": len(accounts),
+                    "data_source": "plaid"
                 }
-            },
-            "usd_equivalent_total": 98500.00,
-            "alerts": [
-                {"type": "info", "message": "Positive cash flow across all regions"}
-            ]
-        }
-        
-        logger.info(f"Daily balance summary generated for {user_id}")
-        
-        return ToolResult(
-            success=True,
-            data=summary,
-            message=f"Daily balance summary for {date}"
-        )
+
+                logger.info(f"Daily balance summary generated for {user_id} (Real Data)")
+
+                return ToolResult(
+                    success=True,
+                    data=summary,
+                    message=f"Daily balance summary for {date} - Total: ${total_balance:,.2f}"
+                )
+        except Exception as e:
+            logger.error(f"Error generating daily summary: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to generate balance summary. Please ensure your bank account is connected.",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -522,80 +490,85 @@ class ListTransactionsTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
-        account_id = parameters.get("account_id")
-        country = parameters.get("country")
+
         days = parameters.get("days", 7)
-        category = parameters.get("category")
         limit = parameters.get("limit", 50)
-        
-        # STUBBED: Generate realistic mock transactions
-        merchants_by_country = {
-            "CA": ["Tim Hortons", "Shoppers Drug Mart", "Loblaws", "Canadian Tire", "Rogers", "Bell Canada"],
-            "US": ["Amazon", "Starbucks", "Walmart", "Target", "AT&T", "Verizon"],
-            "KE": ["Safaricom M-Pesa", "Naivas Supermarket", "Java House", "Nakumatt", "Kenya Power"]
-        }
-        
-        categories = ["food", "shopping", "utilities", "transport", "entertainment", "business", "transfer"]
-        
-        transactions = []
-        countries_to_use = [country] if country else ["CA", "US", "KE"]
-        
-        for _ in range(min(limit, 50)):
-            txn_country = random.choice(countries_to_use)
-            txn_currency = {"CA": "CAD", "US": "USD", "KE": "KES"}[txn_country]
-            amount_multiplier = {"CA": 1, "US": 1, "KE": 150}[txn_country]
-            
-            txn = {
-                "transaction_id": f"TXN-{random.randint(100000, 999999)}",
-                "account_id": f"acc_{txn_country.lower()}_{random.choice(['001', '002'])}",
-                "date": (datetime.now() - timedelta(days=random.randint(0, days))).strftime("%Y-%m-%d"),
-                "merchant": random.choice(merchants_by_country[txn_country]),
-                "amount": round(random.uniform(10, 500) * amount_multiplier, 2),
-                "currency": txn_currency,
-                "country": txn_country,
-                "category": random.choice(categories),
-                "type": random.choice(["debit", "credit"]),
-                "status": "posted",
-                "description": f"Transaction at merchant"
-            }
-            
-            if category and txn["category"] != category:
-                continue
-                
-            transactions.append(txn)
-        
-        transactions.sort(key=lambda x: x["date"], reverse=True)
-        transactions = transactions[:limit]
-        
-        summary = {
-            "total_transactions": len(transactions),
-            "total_debits": sum(t["amount"] for t in transactions if t["type"] == "debit"),
-            "total_credits": sum(t["amount"] for t in transactions if t["type"] == "credit"),
-            "by_category": {}
-        }
-        
-        for txn in transactions:
-            cat = txn["category"]
-            if cat not in summary["by_category"]:
-                summary["by_category"][cat] = {"count": 0, "total": 0}
-            summary["by_category"][cat]["count"] += 1
-            summary["by_category"][cat]["total"] += txn["amount"]
-        
-        logger.info(f"Transactions retrieved for {user_id}: {len(transactions)} transactions")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "transactions": transactions,
-                "summary": summary,
-                "date_range": {
-                    "start": (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
-                    "end": datetime.now().strftime("%Y-%m-%d")
+
+        # Check if user has Plaid connection and fetch real transactions
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
+                )
+                plaid_account = result.scalar_one_or_none()
+
+                if not plaid_account:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        message="No bank accounts connected. Please connect your bank account first to view transactions.",
+                        error="NO_BANK_CONNECTED"
+                    )
+
+                # Fetch real transactions from Plaid
+                end_date = datetime.now().strftime("%Y-%m-%d")
+                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+                transactions_data = await plaid_service.get_transactions(
+                    access_token=plaid_account.access_token,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+
+                transactions = transactions_data.get('transactions', [])
+                transactions = transactions[:limit]
+
+                # Calculate summary
+                summary = {
+                    "total_transactions": len(transactions),
+                    "total_debits": sum(abs(t['amount']) for t in transactions if t['amount'] > 0),
+                    "total_credits": sum(abs(t['amount']) for t in transactions if t['amount'] < 0),
+                    "by_category": {}
                 }
-            },
-            message=f"Retrieved {len(transactions)} transactions"
-        )
+
+                for txn in transactions:
+                    cat = txn.get('category', ['Other'])[0] if txn.get('category') else 'Other'
+                    if cat not in summary["by_category"]:
+                        summary["by_category"][cat] = {"count": 0, "total": 0}
+                    summary["by_category"][cat]["count"] += 1
+                    summary["by_category"][cat]["total"] += abs(txn['amount'])
+
+                logger.info(f"Transactions retrieved for {user_id}: {len(transactions)} transactions (Real Data)")
+
+                return ToolResult(
+                    success=True,
+                    data={
+                        "transactions": transactions,
+                        "summary": summary,
+                        "date_range": {
+                            "start": start_date,
+                            "end": end_date
+                        },
+                        "data_source": "plaid"
+                    },
+                    message=f"Retrieved {len(transactions)} transactions from your connected bank account"
+                )
+        except Exception as e:
+            logger.error(f"Error fetching transactions: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to fetch transactions. Please ensure your bank account is connected.",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -661,50 +634,94 @@ class ExportTransactionsToExcelTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
+
         start_date = parameters.get("start_date")
         end_date = parameters.get("end_date", datetime.now().strftime("%Y-%m-%d"))
-        country = parameters.get("country")
         format_type = parameters.get("format", "quickbooks")
-        
+
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        export_data = {
-            "export_id": f"EXP-{datetime.now().strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
-            "generated_at": datetime.now().isoformat(),
-            "date_range": {
-                "start": start_date,
-                "end": end_date
-            },
-            "format": format_type,
-            "country_filter": country or "all",
-            "file_info": {
-                "filename": f"transactions_{start_date}_to_{end_date}.xlsx",
-                "path": f"./exports/transactions_{start_date}_to_{end_date}.xlsx",
-                "size_kb": random.randint(50, 200),
-                "sheets": ["All Transactions", "By Category", "By Account", "Summary"]
-            },
-            "statistics": {
-                "total_transactions": random.randint(50, 200),
-                "total_debits": round(random.uniform(5000, 20000), 2),
-                "total_credits": round(random.uniform(2000, 10000), 2),
-                "accounts_included": 6 if not country else 2
-            },
-            "quickbooks_ready": format_type == "quickbooks",
-            "columns": [
-                "Date", "Account", "Description", "Category", "Debit", "Credit", 
-                "Currency", "Country", "Reference"
-            ]
-        }
-        
-        logger.info(f"Transaction export generated for {user_id}: {export_data['export_id']}")
-        
-        return ToolResult(
-            success=True,
-            data=export_data,
-            message=f"Excel export ready: {export_data['file_info']['filename']}"
-        )
+            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        # Check if user has Plaid connection
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
+                )
+                plaid_account = result.scalar_one_or_none()
+
+                if not plaid_account:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        message="No bank accounts connected. Please connect your bank account first.",
+                        error="NO_BANK_CONNECTED"
+                    )
+
+                # Fetch real transactions from Plaid
+                transactions_data = await plaid_service.get_transactions(
+                    access_token=plaid_account.access_token,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+
+                transactions = transactions_data.get('transactions', [])
+
+                # Calculate statistics
+                total_debits = sum(abs(t['amount']) for t in transactions if t['amount'] > 0)
+                total_credits = sum(abs(t['amount']) for t in transactions if t['amount'] < 0)
+
+                export_data = {
+                    "export_id": f"EXP-{datetime.now().strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
+                    "generated_at": datetime.now().isoformat(),
+                    "date_range": {
+                        "start": start_date,
+                        "end": end_date
+                    },
+                    "format": format_type,
+                    "file_info": {
+                        "filename": f"transactions_{start_date}_to_{end_date}.xlsx",
+                        "path": f"./exports/transactions_{start_date}_to_{end_date}.xlsx",
+                        "sheets": ["All Transactions", "By Category", "By Account", "Summary"]
+                    },
+                    "statistics": {
+                        "total_transactions": len(transactions),
+                        "total_debits": round(total_debits, 2),
+                        "total_credits": round(total_credits, 2),
+                        "accounts_included": 1
+                    },
+                    "quickbooks_ready": format_type == "quickbooks",
+                    "columns": [
+                        "Date", "Account", "Description", "Category", "Debit", "Credit",
+                        "Currency", "Reference"
+                    ],
+                    "transactions": transactions[:100],  # Include first 100 transactions
+                    "data_source": "plaid"
+                }
+
+                logger.info(f"Transaction export generated for {user_id}: {export_data['export_id']} (Real Data)")
+
+                return ToolResult(
+                    success=True,
+                    data=export_data,
+                    message=f"Excel export ready: {export_data['file_info']['filename']} ({len(transactions)} transactions)"
+                )
+        except Exception as e:
+            logger.error(f"Error exporting transactions: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to export transactions. Please ensure your bank account is connected.",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -761,83 +778,112 @@ class GenerateAccountantReportTool(BaseTool):
                 message="Permission denied",
                 error="User does not have banking_read permission"
             )
-        
+
         week_ending = parameters.get("week_ending", datetime.now().strftime("%Y-%m-%d"))
         send_email = parameters.get("send_email", False)
-        
+
         week_end = datetime.strptime(week_ending, "%Y-%m-%d")
         week_start = week_end - timedelta(days=6)
-        
-        report = {
-            "report_id": f"RPT-{week_end.strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
-            "generated_at": datetime.now().isoformat(),
-            "period": {
-                "start": week_start.strftime("%Y-%m-%d"),
-                "end": week_ending,
-                "type": "weekly"
-            },
-            "summary": {
-                "opening_balance_usd_equiv": 95000.00,
-                "closing_balance_usd_equiv": 98500.00,
-                "net_change_usd_equiv": 3500.00,
-                "total_income": 12500.00,
-                "total_expenses": 9000.00
-            },
-            "by_country": {
-                "CA": {
-                    "currency": "CAD",
-                    "opening_balance": 54000.00,
-                    "closing_balance": 57681.25,
-                    "transactions": 45,
-                    "income": 8500.00,
-                    "expenses": 4818.75
-                },
-                "US": {
-                    "currency": "USD",
-                    "opening_balance": 35000.00,
-                    "closing_balance": 33750.25,
-                    "transactions": 32,
-                    "income": 2000.00,
-                    "expenses": 3249.75
-                },
-                "KE": {
-                    "currency": "KES",
-                    "opening_balance": 4500000.00,
-                    "closing_balance": 4750000.00,
-                    "transactions": 28,
-                    "income": 500000.00,
-                    "expenses": 250000.00
+
+        # Check if user has Plaid connection
+        try:
+            from app.database.database import db_manager
+            from app.database.models import PlaidAccount
+            from app.services.plaid_service import plaid_service
+            from sqlalchemy import select
+
+            async with db_manager.async_session_maker() as session:
+                result = await session.execute(
+                    select(PlaidAccount).where(
+                        PlaidAccount.user_id == user_id,
+                        PlaidAccount.is_active == True
+                    )
+                )
+                plaid_account = result.scalar_one_or_none()
+
+                if not plaid_account:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        message="No bank accounts connected. Please connect your bank account first.",
+                        error="NO_BANK_CONNECTED"
+                    )
+
+                # Fetch transactions and accounts
+                transactions_data = await plaid_service.get_transactions(
+                    access_token=plaid_account.access_token,
+                    start_date=week_start.strftime("%Y-%m-%d"),
+                    end_date=week_ending
+                )
+                accounts_data = await plaid_service.get_accounts(plaid_account.access_token)
+
+                transactions = transactions_data.get('transactions', [])
+                accounts = accounts_data.get('accounts', [])
+
+                # Calculate totals
+                total_balance = sum(acc['balance'].get('current', 0) for acc in accounts)
+                total_income = sum(abs(t['amount']) for t in transactions if t['amount'] < 0)
+                total_expenses = sum(abs(t['amount']) for t in transactions if t['amount'] > 0)
+
+                # Categorize expenses
+                expense_categories = {}
+                for txn in transactions:
+                    if txn['amount'] > 0:  # Expense
+                        cat = txn.get('category', ['Other'])[0] if txn.get('category') else 'Other'
+                        if cat not in expense_categories:
+                            expense_categories[cat] = 0
+                        expense_categories[cat] += abs(txn['amount'])
+
+                report = {
+                    "report_id": f"RPT-{week_end.strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
+                    "generated_at": datetime.now().isoformat(),
+                    "period": {
+                        "start": week_start.strftime("%Y-%m-%d"),
+                        "end": week_ending,
+                        "type": "weekly"
+                    },
+                    "summary": {
+                        "current_balance": round(total_balance, 2),
+                        "total_income": round(total_income, 2),
+                        "total_expenses": round(total_expenses, 2),
+                        "net_change": round(total_income - total_expenses, 2),
+                        "transaction_count": len(transactions)
+                    },
+                    "accounts": [
+                        {
+                            "name": acc['name'],
+                            "balance": acc['balance'].get('current', 0),
+                            "type": acc.get('subtype', acc.get('type'))
+                        } for acc in accounts
+                    ],
+                    "expense_categories": {k: round(v, 2) for k, v in expense_categories.items()},
+                    "attachments": [
+                        {
+                            "name": f"transactions_{week_start.strftime('%Y%m%d')}_{week_ending}.xlsx",
+                            "type": "excel",
+                            "quickbooks_ready": True
+                        }
+                    ],
+                    "notes": "All transactions from connected bank account, ready for QuickBooks import.",
+                    "email_status": "sent" if send_email else "not_requested",
+                    "data_source": "plaid"
                 }
-            },
-            "expense_categories": {
-                "business": 4500.00,
-                "utilities": 1200.00,
-                "travel": 2000.00,
-                "food": 800.00,
-                "other": 500.00
-            },
-            "attachments": [
-                {
-                    "name": f"transactions_{week_start.strftime('%Y%m%d')}_{week_ending}.xlsx",
-                    "type": "excel",
-                    "quickbooks_ready": True
-                },
-                {
-                    "name": f"summary_{week_ending}.pdf",
-                    "type": "pdf"
-                }
-            ],
-            "notes": "All transactions categorized and ready for QuickBooks import.",
-            "email_status": "sent" if send_email else "not_requested"
-        }
-        
-        logger.info(f"Accountant report generated for {user_id}: {report['report_id']}")
-        
-        return ToolResult(
-            success=True,
-            data=report,
-            message=f"Weekly accountant report generated for week ending {week_ending}"
-        )
+
+                logger.info(f"Accountant report generated for {user_id}: {report['report_id']} (Real Data)")
+
+                return ToolResult(
+                    success=True,
+                    data=report,
+                    message=f"Weekly report generated for {week_start.strftime('%Y-%m-%d')} to {week_ending}: {len(transactions)} transactions, ${total_income:,.2f} income, ${total_expenses:,.2f} expenses"
+                )
+        except Exception as e:
+            logger.error(f"Error generating accountant report: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to generate report. Please ensure your bank account is connected.",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {

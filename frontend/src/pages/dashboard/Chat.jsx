@@ -405,7 +405,7 @@ const Chat = () => {
           </div>
           
           <p className="text-center text-xs text-slate-500 mt-3">
-            Salim AI can make mistakes. Consider checking important information.
+            AN INTELLIGENT AI can make mistakes. Consider checking important information.
           </p>
         </div>
       </div>

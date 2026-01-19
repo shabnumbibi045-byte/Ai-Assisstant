@@ -252,35 +252,10 @@ class DemoDataService:
         """Get contextual summary based on query."""
         query_lower = query.lower()
 
-        # Banking queries
+        # Banking queries - DO NOT provide demo data, force tool usage
         if any(word in query_lower for word in ["balance", "account", "bank", "money"]):
-            accounts = DemoDataService.get_demo_bank_accounts()
-            total_cad = sum(a["balance"] for a in accounts if a["currency"] == "CAD")
-            total_usd = sum(a["balance"] for a in accounts if a["currency"] == "USD")
-            total_kes = sum(a["balance"] for a in accounts if a["currency"] == "KES")
-
-            return f"""
-**Account Summary:**
-
-**Canada (CAD):**
-- TD Business Checking: ${accounts[0]['balance']:,.2f}
-- TD High Interest Savings: ${accounts[1]['balance']:,.2f}
-- **Total CAD:** ${total_cad:,.2f}
-
-**United States (USD):**
-- Chase Business Checking: ${accounts[2]['balance']:,.2f}
-- Chase Savings Plus: ${accounts[3]['balance']:,.2f}
-- **Total USD:** ${total_usd:,.2f}
-
-**Kenya (KES):**
-- KCB Current Account: {accounts[4]['balance']:,.0f} KES
-- KCB Savings Account: {accounts[5]['balance']:,.0f} KES
-- **Total KES:** {total_kes:,.0f} KES
-
-**Combined Total:** ~$375,000 CAD equivalent
-
-All accounts are active and in good standing! 💰
-"""
+            # Return empty string to force AI to use real banking tools
+            return ""
 
         # Stock queries
         elif any(word in query_lower for word in ["stock", "portfolio", "shares", "invest"]):

@@ -92,8 +92,58 @@ async def exchange_public_token(
     try:
         result = await plaid_service.exchange_public_token(request.public_token)
 
-        # TODO: Store access_token in database associated with user
-        logger.info(f"Access token obtained for user {current_user.id}")
+        # Store access_token in database
+        from app.database.database import db_manager
+        from app.database.models import PlaidAccount
+
+        # Get accounts to cache institution info
+        accounts_data = await plaid_service.get_accounts(result['access_token'])
+
+        # Check if there's an existing account for this user and update it
+        async with db_manager.async_session_maker() as session:
+            # Try to find existing plaid account by user_id (UUID) or by integer id
+            from sqlalchemy import select, or_
+            result_query = await session.execute(
+                select(PlaidAccount).where(
+                    or_(
+                        PlaidAccount.user_id == current_user.user_id,
+                        PlaidAccount.user_id == str(current_user.id)
+                    )
+                )
+            )
+            existing_accounts = result_query.scalars().all()
+
+            # If multiple accounts found, use the first one and delete others
+            existing_account = existing_accounts[0] if existing_accounts else None
+            if len(existing_accounts) > 1:
+                logger.warning(f"Found {len(existing_accounts)} PlaidAccounts for user, keeping first and removing duplicates")
+                for duplicate in existing_accounts[1:]:
+                    await session.delete(duplicate)
+
+            if existing_account:
+                # Update existing account with new data and correct user_id
+                existing_account.user_id = current_user.user_id  # Update to UUID
+                existing_account.access_token = result['access_token']
+                existing_account.item_id = result['item_id']
+                existing_account.institution_id = accounts_data.get('item', {}).get('institution_id')
+                existing_account.account_data = accounts_data.get('accounts', [])
+                existing_account.is_active = True
+                logger.info(f"Updated existing Plaid account for user {current_user.user_id}")
+            else:
+                # Create new account
+                plaid_account = PlaidAccount(
+                    user_id=current_user.user_id,
+                    access_token=result['access_token'],  # TODO: Encrypt in production
+                    item_id=result['item_id'],
+                    institution_id=accounts_data.get('item', {}).get('institution_id'),
+                    account_data=accounts_data.get('accounts', [])
+                )
+                session.add(plaid_account)
+                logger.info(f"Created new Plaid account for user {current_user.user_id}")
+
+            await session.commit()
+
+        logger.info(f"Access token stored for user {current_user.user_id}, item {result['item_id']}")
 
         return ExchangeTokenResponse(**result)
 

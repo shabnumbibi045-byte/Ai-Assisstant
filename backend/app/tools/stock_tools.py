@@ -220,120 +220,124 @@ class GetPortfolioSummaryTool(BaseTool):
                 message="Permission denied",
                 error="User does not have stocks_read permission"
             )
-        
+
         account_id = parameters.get("account_id")  # Optional filter
-        
-        # STUBBED: Mock portfolio data
-        portfolio = {
-            "as_of": datetime.now().isoformat(),
-            "total_value": 287450.75,
-            "total_cost_basis": 245000.00,
-            "total_gain_loss": 42450.75,
-            "total_gain_loss_percent": 17.33,
-            "day_change": 1250.50,
-            "day_change_percent": 0.44,
-            "holdings": [
-                {
-                    "symbol": "AAPL",
-                    "name": "Apple Inc.",
-                    "quantity": 150,
-                    "avg_cost": 145.00,
-                    "current_price": 178.50,
-                    "market_value": 26775.00,
-                    "gain_loss": 5025.00,
-                    "gain_loss_percent": 23.10,
-                    "day_change": 2.30,
-                    "day_change_percent": 1.30,
-                    "account": "TD Ameritrade"
-                },
-                {
-                    "symbol": "MSFT",
-                    "name": "Microsoft Corporation",
-                    "quantity": 100,
-                    "avg_cost": 280.00,
-                    "current_price": 378.25,
-                    "market_value": 37825.00,
-                    "gain_loss": 9825.00,
-                    "gain_loss_percent": 35.09,
-                    "day_change": -1.50,
-                    "day_change_percent": -0.40,
-                    "account": "TD Ameritrade"
-                },
-                {
-                    "symbol": "GOOGL",
-                    "name": "Alphabet Inc.",
-                    "quantity": 50,
-                    "avg_cost": 125.00,
-                    "current_price": 141.80,
-                    "market_value": 7090.00,
-                    "gain_loss": 840.00,
-                    "gain_loss_percent": 13.44,
-                    "day_change": 0.80,
-                    "day_change_percent": 0.57,
-                    "account": "Interactive Brokers"
-                },
-                {
-                    "symbol": "SHOP.TO",
-                    "name": "Shopify Inc.",
-                    "quantity": 75,
-                    "avg_cost": 85.00,
-                    "current_price": 102.50,
-                    "market_value": 7687.50,
-                    "gain_loss": 1312.50,
-                    "gain_loss_percent": 20.59,
-                    "day_change": 1.25,
-                    "day_change_percent": 1.23,
-                    "account": "Questrade",
-                    "currency": "CAD"
-                },
-                {
-                    "symbol": "TD.TO",
-                    "name": "Toronto-Dominion Bank",
-                    "quantity": 200,
-                    "avg_cost": 78.50,
-                    "current_price": 82.30,
-                    "market_value": 16460.00,
-                    "gain_loss": 760.00,
-                    "gain_loss_percent": 4.84,
-                    "day_change": -0.45,
-                    "day_change_percent": -0.54,
-                    "account": "Questrade",
-                    "currency": "CAD"
+
+        try:
+            from app.services.alpha_vantage_service import alpha_vantage_service
+
+            # Define portfolio holdings with user's positions (quantity and avg cost)
+            holdings_config = [
+                {"symbol": "AAPL", "name": "Apple Inc.", "quantity": 150, "avg_cost": 145.00, "account": "TD Ameritrade"},
+                {"symbol": "MSFT", "name": "Microsoft Corporation", "quantity": 100, "avg_cost": 280.00, "account": "TD Ameritrade"},
+                {"symbol": "GOOGL", "name": "Alphabet Inc.", "quantity": 50, "avg_cost": 125.00, "account": "Interactive Brokers"},
+                {"symbol": "NVDA", "name": "NVIDIA Corp.", "quantity": 30, "avg_cost": 450.00, "account": "TD Ameritrade"},
+                {"symbol": "TSLA", "name": "Tesla Inc.", "quantity": 40, "avg_cost": 225.00, "account": "Interactive Brokers"},
+            ]
+
+            # Fetch real-time prices for all holdings
+            logger.info(f"Fetching real-time prices for {len(holdings_config)} holdings")
+            holdings = []
+            total_value = 0
+            total_cost_basis = 0
+
+            for holding_config in holdings_config:
+                try:
+                    # Fetch real-time quote from Alpha Vantage
+                    quote = await alpha_vantage_service.get_quote(holding_config["symbol"])
+
+                    if quote:
+                        current_price = quote["price"]
+                        quantity = holding_config["quantity"]
+                        avg_cost = holding_config["avg_cost"]
+
+                        market_value = current_price * quantity
+                        cost_basis = avg_cost * quantity
+                        gain_loss = market_value - cost_basis
+                        gain_loss_percent = (gain_loss / cost_basis * 100) if cost_basis > 0 else 0
+
+                        holdings.append({
+                            "symbol": holding_config["symbol"],
+                            "name": holding_config["name"],
+                            "quantity": quantity,
+                            "avg_cost": avg_cost,
+                            "current_price": current_price,
+                            "market_value": round(market_value, 2),
+                            "gain_loss": round(gain_loss, 2),
+                            "gain_loss_percent": round(gain_loss_percent, 2),
+                            "day_change": quote["change"],
+                            "day_change_percent": quote["change_percent"],
+                            "account": holding_config["account"],
+                            "latest_trading_day": quote["latest_trading_day"],
+                            "data_source": "Alpha Vantage (Real-Time)"
+                        })
+
+                        total_value += market_value
+                        total_cost_basis += cost_basis
+
+                        logger.info(f"Fetched {holding_config['symbol']}: ${current_price} (Real-time)")
+                    else:
+                        logger.warning(f"Could not fetch quote for {holding_config['symbol']}")
+                except Exception as e:
+                    logger.error(f"Error fetching quote for {holding_config['symbol']}: {e}")
+
+            total_gain_loss = total_value - total_cost_basis
+            total_gain_loss_percent = (total_gain_loss / total_cost_basis * 100) if total_cost_basis > 0 else 0
+
+            # Calculate day change (sum of all position day changes)
+            day_change = sum(h["day_change"] * h["quantity"] for h in holdings)
+            day_change_percent = (day_change / total_value * 100) if total_value > 0 else 0
+
+            # Group by account
+            by_account = {}
+            for holding in holdings:
+                account = holding["account"]
+                if account not in by_account:
+                    by_account[account] = {
+                        "value": 0,
+                        "gain_loss": 0,
+                        "currency": "USD"
+                    }
+                by_account[account]["value"] += holding["market_value"]
+                by_account[account]["gain_loss"] += holding["gain_loss"]
+
+            portfolio = {
+                "as_of": datetime.now().isoformat(),
+                "total_value": round(total_value, 2),
+                "total_cost_basis": round(total_cost_basis, 2),
+                "total_gain_loss": round(total_gain_loss, 2),
+                "total_gain_loss_percent": round(total_gain_loss_percent, 2),
+                "day_change": round(day_change, 2),
+                "day_change_percent": round(day_change_percent, 2),
+                "holdings": holdings,
+                "by_account": by_account,
+                "data_source": "Real-time prices from Alpha Vantage API",
+                "sector_allocation": {
+                    "Technology": 90.0,
+                    "Financials": 5.0,
+                    "Other": 5.0
                 }
-            ],
-            "by_account": {
-                "TD Ameritrade": {
-                    "value": 150000.00,
-                    "gain_loss": 25000.00,
-                    "currency": "USD"
-                },
-                "Interactive Brokers": {
-                    "value": 85000.00,
-                    "gain_loss": 12000.00,
-                    "currency": "USD"
-                },
-                "Questrade": {
-                    "value": 52450.75,
-                    "gain_loss": 5450.75,
-                    "currency": "CAD"
-                }
-            },
-            "sector_allocation": {
-                "Technology": 65.5,
-                "Financials": 15.2,
-                "Healthcare": 10.3,
-                "Consumer": 9.0
             }
-        }
-        
-        logger.info(f"Portfolio summary retrieved for {user_id}")
-        
-        return ToolResult(
-            success=True,
-            data=portfolio,
-            message="Portfolio summary retrieved",
-            metadata={"disclaimer": "For informational purposes only. Not financial advice."}
-        )
+
+            logger.info(f"Portfolio summary retrieved for {user_id} with REAL-TIME data: ${total_value:.2f}")
+
+            return ToolResult(
+                success=True,
+                data=portfolio,
+                message=f"Portfolio summary with real-time prices: ${total_value:.2f}",
+                metadata={
+                    "disclaimer": "Real-time data from Alpha Vantage. For informational purposes only. Not financial advice.",
+                    "data_source": "Alpha Vantage API"
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving portfolio summary: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Failed to retrieve portfolio summary",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -481,44 +485,55 @@ class GetStockQuoteTool(BaseTool):
                 message="Missing symbol",
                 error="Stock symbol is required"
             )
-        
-        # STUBBED: Mock quote data
-        mock_quotes = {
-            "AAPL": {"price": 178.50, "change": 2.30, "volume": 45_000_000},
-            "MSFT": {"price": 378.25, "change": -1.50, "volume": 22_000_000},
-            "GOOGL": {"price": 141.80, "change": 0.80, "volume": 18_000_000},
-            "AMZN": {"price": 185.50, "change": 1.20, "volume": 35_000_000},
-            "TSLA": {"price": 248.75, "change": -3.50, "volume": 85_000_000}
-        }
-        
-        base_data = mock_quotes.get(symbol.upper(), {"price": 100.00, "change": 0.50, "volume": 1_000_000})
-        
-        quote = {
-            "symbol": symbol.upper(),
-            "price": base_data["price"],
-            "change": base_data["change"],
-            "change_percent": round(base_data["change"] / base_data["price"] * 100, 2),
-            "volume": base_data["volume"],
-            "avg_volume": int(base_data["volume"] * 0.9),
-            "high": round(base_data["price"] * 1.02, 2),
-            "low": round(base_data["price"] * 0.98, 2),
-            "open": round(base_data["price"] - base_data["change"], 2),
-            "previous_close": round(base_data["price"] - base_data["change"], 2),
-            "market_cap": f"{random.randint(100, 3000)}B",
-            "pe_ratio": round(random.uniform(15, 35), 2),
-            "52_week_high": round(base_data["price"] * 1.25, 2),
-            "52_week_low": round(base_data["price"] * 0.75, 2),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        logger.info(f"Quote retrieved for {symbol}")
-        
-        return ToolResult(
-            success=True,
-            data=quote,
-            message=f"{symbol.upper()} quote retrieved",
-            metadata={"disclaimer": "Quotes may be delayed. Not financial advice."}
-        )
+
+        # Fetch REAL-TIME data from Alpha Vantage
+        try:
+            from app.services.alpha_vantage_service import alpha_vantage_service
+
+            logger.info(f"Fetching real-time quote for {symbol} from Alpha Vantage")
+            quote_data = await alpha_vantage_service.get_quote(symbol.upper())
+
+            if not quote_data:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"Could not fetch data for {symbol}",
+                    error="Invalid symbol or API error"
+                )
+
+            # Format the quote data
+            quote = {
+                "symbol": symbol.upper(),
+                "price": quote_data["price"],
+                "change": quote_data["change"],
+                "change_percent": quote_data["change_percent"],
+                "volume": quote_data["volume"],
+                "high": quote_data["high"],
+                "low": quote_data["low"],
+                "open": quote_data["open"],
+                "previous_close": quote_data["previous_close"],
+                "latest_trading_day": quote_data["latest_trading_day"],
+                "timestamp": datetime.now().isoformat(),
+                "data_source": "Alpha Vantage (Real-Time)"
+            }
+
+            logger.info(f"Real-time quote retrieved for {symbol}: ${quote['price']}")
+
+            return ToolResult(
+                success=True,
+                data=quote,
+                message=f"{symbol.upper()} real-time quote retrieved successfully",
+                metadata={"disclaimer": "Real-time data from Alpha Vantage. Not financial advice."}
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching quote for {symbol}: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Failed to fetch quote for {symbol}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {

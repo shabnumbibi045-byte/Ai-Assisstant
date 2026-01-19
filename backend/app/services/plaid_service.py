@@ -80,17 +80,22 @@ class PlaidService:
                 client_name="Salim AI Assistant",
                 products=[Products("auth"), Products("transactions")],
                 country_codes=countries,
-                language="en",
-                redirect_uri=None  # For web, not needed
+                language="en"
+                # redirect_uri removed - not needed for web integration
             )
 
             response = self.client.link_token_create(request)
 
             logger.info(f"Link token created for user {user_id}")
 
+            # Convert expiration datetime to string if needed
+            expiration = response['expiration']
+            if hasattr(expiration, 'isoformat'):
+                expiration = expiration.isoformat()
+
             return {
                 "link_token": response['link_token'],
-                "expiration": response['expiration'],
+                "expiration": expiration,
                 "request_id": response.get('request_id')
             }
 
@@ -155,8 +160,8 @@ class PlaidService:
                     "account_id": account['account_id'],
                     "name": account['name'],
                     "official_name": account.get('official_name'),
-                    "type": account['type'],
-                    "subtype": account['subtype'],
+                    "type": str(account['type']) if account['type'] else None,
+                    "subtype": str(account['subtype']) if account['subtype'] else None,
                     "mask": account.get('mask'),
                     "balance": {
                         "current": account['balances']['current'],
@@ -204,8 +209,8 @@ class PlaidService:
                 account_data = {
                     "account_id": account['account_id'],
                     "name": account['name'],
-                    "type": account['type'],
-                    "subtype": account['subtype'],
+                    "type": str(account['type']) if account['type'] else None,
+                    "subtype": str(account['subtype']) if account['subtype'] else None,
                     "mask": account.get('mask')
                 }
 

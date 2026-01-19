@@ -72,7 +72,7 @@ class AuthService:
         await db.flush()  # Flush to get the user.id before creating permissions
 
         # Add default permissions
-        default_modules = ["chat", "memory"]
+        default_modules = ["chat", "memory", "banking", "stocks", "travel", "research"]
         for module in default_modules:
             permission = UserPermission(
                 user_id=user.id,

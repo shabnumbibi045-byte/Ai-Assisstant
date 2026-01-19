@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     AMADEUS_API_KEY: Optional[str] = None
     AMADEUS_API_SECRET: Optional[str] = None
     AMADEUS_ENV: str = "test"  # test, production
+    AMADEUS_TEST_MODE: bool = True  # Use test environment
     
     # Skyscanner API
     SKYSCANNER_API_KEY: Optional[str] = None
@@ -147,7 +148,7 @@ class Settings(BaseSettings):
     # ===========================================
     # Legal research APIs
     CANLII_API_KEY: Optional[str] = None  # Canadian legal research
-    COURTLISTENER_API_KEY: Optional[str] = None  # US legal research
+    COURTLISTENER_API_TOKEN: Optional[str] = None  # US legal research (CourtListener API)
     WESTLAW_API_KEY: Optional[str] = None
     
     # General research

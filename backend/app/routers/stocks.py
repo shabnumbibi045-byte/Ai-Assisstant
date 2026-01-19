@@ -284,48 +284,48 @@ async def get_stock_quote(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Get real-time stock quote.
-    Supports all major exchanges.
+    Get real-time stock quote from Alpha Vantage.
+    Supports all major US stock exchanges.
     """
     try:
-        # Demo data - in production would fetch from real API
+        from app.services.alpha_vantage_service import alpha_vantage_service
+
         symbol = symbol.upper()
+        logger.info(f"Fetching real-time quote for {symbol} from Alpha Vantage")
 
-        stock_data = {
-            "AAPL": ("Apple Inc.", 178.25, 2.45, 1.39, 15_234_567, 2.8e12, 28.5, 0.52, 199.62, 124.17),
-            "MSFT": ("Microsoft Corporation", 368.50, 5.20, 1.43, 12_456_789, 2.7e12, 34.2, 0.78, 384.30, 245.18),
-            "GOOGL": ("Alphabet Inc.", 140.75, -0.85, -0.60, 18_567_234, 1.8e12, 25.3, None, 151.55, 102.21),
-            "TSLA": ("Tesla, Inc.", 242.80, 8.50, 3.63, 45_123_456, 770e9, 65.8, None, 299.29, 101.81),
-        }
+        # Fetch real-time quote data
+        quote_data = await alpha_vantage_service.get_quote(symbol)
 
-        if symbol not in stock_data:
-            raise HTTPException(status_code=404, detail=f"Stock symbol {symbol} not found")
+        if not quote_data:
+            raise HTTPException(status_code=404, detail=f"Stock symbol {symbol} not found or API error")
 
-        data = stock_data[symbol]
+        # Fetch company overview for additional data (PE ratio, market cap, etc.)
+        overview_data = await alpha_vantage_service.get_company_overview(symbol)
 
+        # Build quote response
         quote = StockQuote(
             symbol=symbol,
-            company_name=data[0],
-            price=data[1],
-            change=data[2],
-            change_percent=data[3],
-            volume=data[4],
-            market_cap=data[5],
-            pe_ratio=data[6],
-            dividend_yield=data[7],
-            high_52week=data[8],
-            low_52week=data[9],
+            company_name=overview_data.get("name", symbol) if overview_data else symbol,
+            price=quote_data["price"],
+            change=quote_data["change"],
+            change_percent=quote_data["change_percent"],
+            volume=quote_data["volume"],
+            market_cap=float(overview_data.get("market_cap", 0)) if overview_data and overview_data.get("market_cap") else 0,
+            pe_ratio=float(overview_data.get("pe_ratio", 0)) if overview_data and overview_data.get("pe_ratio") else None,
+            dividend_yield=float(overview_data.get("dividend_yield", 0)) if overview_data and overview_data.get("dividend_yield") else None,
+            high_52week=float(overview_data.get("52_week_high", 0)) if overview_data and overview_data.get("52_week_high") else quote_data["high"],
+            low_52week=float(overview_data.get("52_week_low", 0)) if overview_data and overview_data.get("52_week_low") else quote_data["low"],
             last_updated=datetime.now()
         )
 
-        logger.info(f"Retrieved quote for {symbol}")
+        logger.info(f"Retrieved real-time quote for {symbol}: ${quote.price}")
         return quote
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving quote: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve quote")
+        logger.error(f"Error retrieving quote for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve quote: {str(e)}")
 
 
 @router.get("/news", response_model=List[MarketNews])

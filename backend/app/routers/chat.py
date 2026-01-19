@@ -183,7 +183,8 @@ async def chat(
     try:
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
-        user_id = str(current_user.id)
+        # Use user_id (UUID) instead of id (integer) for consistency with PlaidAccount
+        user_id = current_user.user_id
 
         # Get or create chat session in database
         chat_session = await get_or_create_chat_session(

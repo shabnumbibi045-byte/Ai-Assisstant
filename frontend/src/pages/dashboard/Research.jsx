@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/authStore';
 import {
   HiSearch,
   HiDocumentText,
@@ -14,93 +15,51 @@ import {
   HiStar,
   HiScale,
   HiLibrary,
+  HiCheckCircle,
+  HiXCircle,
 } from 'react-icons/hi';
 import { FaGavel, FaFileContract, FaBalanceScale } from 'react-icons/fa';
 
+// API base URL from environment
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+
 const Research = () => {
+  const { token, user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('search');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedJurisdiction, setSelectedJurisdiction] = useState('all');
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState('federal');
+  const [selectedCourt, setSelectedCourt] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-
-  // Mock search results
-  const searchResults = [
-    {
-      id: 1,
-      title: 'Smith v. Jones Corporation (2023)',
-      type: 'Case Law',
-      jurisdiction: 'Canada',
-      court: 'Supreme Court of Canada',
-      date: '2023-08-15',
-      relevance: 95,
-      summary: 'Landmark decision on corporate liability in environmental damage cases...',
-      citations: 45,
-    },
-    {
-      id: 2,
-      title: 'Contract Law Amendment Act, 2023',
-      type: 'Legislation',
-      jurisdiction: 'Kenya',
-      court: 'National Assembly',
-      date: '2023-06-20',
-      relevance: 88,
-      summary: 'Amendments to contract formation requirements and electronic signatures...',
-      citations: 23,
-    },
-    {
-      id: 3,
-      title: 'Johnson v. Tech Industries Inc.',
-      type: 'Case Law',
-      jurisdiction: 'United States',
-      court: 'US Court of Appeals',
-      date: '2023-09-10',
-      relevance: 82,
-      summary: 'Important ruling on intellectual property rights in AI-generated content...',
-      citations: 67,
-    },
-  ];
-
-  // Mock projects
-  const projects = [
-    {
-      id: 1,
-      name: 'Corporate Merger Review',
-      client: 'ABC Holdings',
-      documents: 24,
-      lastUpdated: '2024-01-18',
-      status: 'Active',
-    },
-    {
-      id: 2,
-      name: 'IP Litigation Research',
-      client: 'Tech Startup Inc.',
-      documents: 15,
-      lastUpdated: '2024-01-15',
-      status: 'Active',
-    },
-    {
-      id: 3,
-      name: 'Real Estate Due Diligence',
-      client: 'Property Group Ltd.',
-      documents: 31,
-      lastUpdated: '2024-01-10',
-      status: 'Completed',
-    },
-  ];
-
-  // Mock bookmarks
-  const bookmarks = [
-    { id: 1, title: 'Anti-Trust Guidelines 2023', type: 'Regulation', date: '2024-01-15' },
-    { id: 2, title: 'Corporate Governance Best Practices', type: 'Article', date: '2024-01-12' },
-    { id: 3, title: 'Cross-Border Transaction Framework', type: 'Legislation', date: '2024-01-08' },
-  ];
+  const [searchResults, setSearchResults] = useState([]);
+  const [totalResults, setTotalResults] = useState(0);
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const jurisdictions = [
-    { code: 'all', name: 'All Jurisdictions', flag: '🌍' },
-    { code: 'CA', name: 'Canada', flag: '🇨🇦' },
-    { code: 'US', name: 'United States', flag: '🇺🇸' },
-    { code: 'KE', name: 'Kenya', flag: '🇰🇪' },
-    { code: 'UK', name: 'United Kingdom', flag: '🇬🇧' },
+    { code: 'federal', name: 'Federal Courts', flag: '🇺🇸', description: 'Supreme Court, Circuit Courts, District Courts' },
+    { code: 'state', name: 'State Courts', flag: '🏛️', description: 'State Supreme and Appellate Courts' },
+  ];
+
+  const commonCourts = [
+    { code: '', name: 'All Courts' },
+    { code: 'scotus', name: 'Supreme Court of the United States' },
+    { code: 'ca1', name: '1st Circuit Court of Appeals' },
+    { code: 'ca2', name: '2nd Circuit Court of Appeals' },
+    { code: 'ca3', name: '3rd Circuit Court of Appeals' },
+    { code: 'ca4', name: '4th Circuit Court of Appeals' },
+    { code: 'ca5', name: '5th Circuit Court of Appeals' },
+    { code: 'ca6', name: '6th Circuit Court of Appeals' },
+    { code: 'ca7', name: '7th Circuit Court of Appeals' },
+    { code: 'ca8', name: '8th Circuit Court of Appeals' },
+    { code: 'ca9', name: '9th Circuit Court of Appeals' },
+    { code: 'ca10', name: '10th Circuit Court of Appeals' },
+    { code: 'ca11', name: '11th Circuit Court of Appeals' },
+    { code: 'cadc', name: 'D.C. Circuit Court of Appeals' },
+    { code: 'cafc', name: 'Federal Circuit Court of Appeals' },
+    { code: 'nysd', name: 'S.D. New York' },
+    { code: 'cand', name: 'N.D. California' },
+    { code: 'cacd', name: 'C.D. California' },
   ];
 
   const handleSearch = async () => {
@@ -108,10 +67,79 @@ const Research = () => {
       toast.error('Please enter a search query');
       return;
     }
+
+    if (!token) {
+      toast.error('Please log in to search cases');
+      return;
+    }
+
     setIsSearching(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    toast.success(`Found ${searchResults.length} results`);
-    setIsSearching(false);
+    setSearchResults([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/tools/invoke`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: user?.user_id || user?.id || 'unknown',
+          tool_name: 'search_legal_us',
+          parameters: {
+            query: searchQuery,
+            jurisdiction: selectedJurisdiction,
+            court: selectedCourt || undefined,
+            date_filed_after: dateFrom || undefined,
+            date_filed_before: dateTo || undefined,
+            limit: 10
+          }
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        const results = data.data.results || [];
+        setSearchResults(results);
+        setTotalResults(data.data.total_results || 0);
+
+        if (results.length > 0) {
+          toast.success(`Found ${data.data.total_results} cases from CourtListener API`, {
+            duration: 4000,
+            icon: '⚖️'
+          });
+        } else {
+          toast.error('No cases found. Try different search terms or filters.');
+        }
+      } else {
+        toast.error(data.message || 'Failed to search cases');
+      }
+    } catch (error) {
+      toast.error('Failed to search cases. Please try again.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr || dateStr === 'Unknown') return 'Date unknown';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const getCourtBadgeColor = (court) => {
+    if (court.includes('Supreme Court')) return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+    if (court.includes('Circuit') || court.includes('Appeals')) return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    if (court.includes('District')) return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+    return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
   };
 
   return (
@@ -119,313 +147,305 @@ const Research = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-bold text-white">Legal Research</h1>
-          <p className="text-slate-400">Search case law, statutes, and regulations across jurisdictions</p>
+          <h1 className="text-2xl font-display font-bold text-white flex items-center gap-2">
+            <FaBalanceScale className="w-7 h-7 text-primary-400" />
+            Legal Research
+          </h1>
+          <p className="text-slate-400">Search millions of US court opinions via CourtListener API</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="btn-ghost flex items-center gap-2 border border-slate-700">
-            <HiBookmark className="w-5 h-5" />
-            Bookmarks
-          </button>
-          <button className="btn-primary flex items-center gap-2">
-            <HiPlus className="w-5 h-5" />
-            New Project
-          </button>
+          <span className="badge badge-primary flex items-center gap-1">
+            <HiCheckCircle className="w-4 h-4" />
+            Real-Time Data
+          </span>
         </div>
       </div>
 
       {/* Search Section */}
       <div className="card bg-gradient-to-br from-slate-800/80 to-slate-900/80">
-        <div className="flex flex-col md:flex-row gap-4 mb-4">
-          <div className="flex-1 relative">
-            <HiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search case law, statutes, regulations..."
-              className="input pl-12 py-3.5"
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            />
-          </div>
-          <select
-            value={selectedJurisdiction}
-            onChange={(e) => setSelectedJurisdiction(e.target.value)}
-            className="input w-full md:w-48"
-          >
-            {jurisdictions.map(j => (
-              <option key={j.code} value={j.code}>{j.flag} {j.name}</option>
-            ))}
-          </select>
-          <button className="btn-ghost flex items-center gap-2 border border-slate-700">
-            <HiFilter className="w-5 h-5" />
-            Filters
-          </button>
-          <button
-            onClick={handleSearch}
-            disabled={isSearching}
-            className="btn-primary flex items-center gap-2 px-6"
-          >
-            {isSearching ? (
-              <>
-                <span className="spinner-small" />
-                Searching...
-              </>
-            ) : (
-              <>
-                <HiSearch className="w-5 h-5" />
-                Search
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Quick Filters */}
-        <div className="flex flex-wrap gap-2">
-          {['Case Law', 'Legislation', 'Regulations', 'Commentary', 'Treaties'].map((filter) => (
+        <div className="flex flex-col gap-4">
+          {/* Main Search Bar */}
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+              <HiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search US case law (e.g., habeas corpus, Fourth Amendment, negligence)..."
+                className="input pl-12 py-3.5"
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              />
+            </div>
             <button
-              key={filter}
-              className="px-3 py-1.5 rounded-lg text-sm bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+              onClick={handleSearch}
+              disabled={isSearching}
+              className="btn-primary flex items-center gap-2 px-6 whitespace-nowrap"
             >
-              {filter}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-slate-800">
-        <div className="flex gap-6">
-          {['search', 'projects', 'bookmarks'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 px-1 capitalize transition-colors relative ${
-                activeTab === tab
-                  ? 'text-white'
-                  : 'text-slate-400 hover:text-slate-300'
-              }`}
-            >
-              {tab === 'search' ? 'Results' : tab}
-              {activeTab === tab && (
-                <motion.div
-                  layoutId="researchTab"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"
-                />
+              {isSearching ? (
+                <>
+                  <span className="spinner-small" />
+                  Searching...
+                </>
+              ) : (
+                <>
+                  <HiSearch className="w-5 h-5" />
+                  Search Cases
+                </>
               )}
             </button>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Search Results */}
-      {activeTab === 'search' && (
-        <div className="space-y-4">
-          {searchResults.map((result, index) => (
-            <motion.div
-              key={result.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-              className="card hover:border-primary-500/50 cursor-pointer"
+          {/* Filters Row */}
+          <div className="flex flex-col md:flex-row gap-4">
+            <select
+              value={selectedJurisdiction}
+              onChange={(e) => setSelectedJurisdiction(e.target.value)}
+              className="input flex-1"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                    result.type === 'Case Law' ? 'bg-primary-500/20' : 'bg-secondary-500/20'
-                  }`}>
-                    {result.type === 'Case Law' ? (
-                      <FaGavel className={`w-6 h-6 ${result.type === 'Case Law' ? 'text-primary-400' : 'text-secondary-400'}`} />
-                    ) : (
-                      <HiLibrary className="w-6 h-6 text-secondary-400" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`badge ${result.type === 'Case Law' ? 'badge-primary' : 'badge-secondary'}`}>
-                        {result.type}
-                      </span>
-                      <span className="text-sm text-slate-400">{result.jurisdiction}</span>
-                      <span className="text-sm text-slate-500">•</span>
-                      <span className="text-sm text-slate-400">{result.court}</span>
-                    </div>
-                    <h3 className="text-lg font-semibold text-white mb-2">{result.title}</h3>
-                    <p className="text-slate-400 text-sm line-clamp-2">{result.summary}</p>
-                    <div className="flex items-center gap-4 mt-3">
-                      <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <HiClock className="w-4 h-4" />
-                        {result.date}
-                      </span>
-                      <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <HiDocumentText className="w-4 h-4" />
-                        {result.citations} citations
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-400">Relevance</span>
-                    <span className={`font-bold ${
-                      result.relevance >= 90 ? 'text-emerald-400' : result.relevance >= 80 ? 'text-amber-400' : 'text-slate-400'
-                    }`}>
-                      {result.relevance}%
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
-                      <HiBookmark className="w-5 h-5" />
-                    </button>
-                    <button className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
-                      <HiDownload className="w-5 h-5" />
-                    </button>
-                    <button className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
-                      <HiExternalLink className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
+              {jurisdictions.map(j => (
+                <option key={j.code} value={j.code}>{j.flag} {j.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedCourt}
+              onChange={(e) => setSelectedCourt(e.target.value)}
+              className="input flex-1"
+            >
+              {commonCourts.map(c => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="btn-ghost flex items-center gap-2 border border-slate-700"
+            >
+              <HiFilter className="w-5 h-5" />
+              Date Filters
+            </button>
+          </div>
+
+          {/* Advanced Filters */}
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex flex-col md:flex-row gap-4 pt-4 border-t border-slate-700"
+            >
+              <div className="flex-1">
+                <label className="text-sm text-slate-400 mb-2 block">Filed After</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="input"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-sm text-slate-400 mb-2 block">Filed Before</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="input"
+                />
               </div>
             </motion.div>
-          ))}
-
-          {searchResults.length === 0 && (
-            <div className="card text-center py-16">
-              <FaBalanceScale className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-2">Start Your Research</h3>
-              <p className="text-slate-400 max-w-md mx-auto">
-                Search across case law, legislation, and regulations from Canada, United States, Kenya, and more.
-              </p>
-            </div>
           )}
-        </div>
-      )}
 
-      {/* Projects */}
-      {activeTab === 'projects' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((project, index) => (
-            <motion.div
-              key={project.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-              className="card hover:border-primary-500/50 cursor-pointer"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center">
-                  <HiFolder className="w-6 h-6 text-white" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-white">{project.name}</h3>
-                  <p className="text-sm text-slate-400">{project.client}</p>
-                </div>
-                <span className={`badge ${project.status === 'Active' ? 'badge-primary' : 'bg-slate-700 text-slate-300'}`}>
-                  {project.status}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-400 flex items-center gap-1">
-                  <HiDocumentText className="w-4 h-4" />
-                  {project.documents} documents
-                </span>
-                <span className="text-slate-500 flex items-center gap-1">
-                  <HiClock className="w-4 h-4" />
-                  {project.lastUpdated}
-                </span>
-              </div>
-            </motion.div>
-          ))}
-
-          {/* Add Project Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: projects.length * 0.1 }}
-            className="card border-dashed cursor-pointer hover:border-primary-500/50 flex items-center justify-center py-12"
-            onClick={() => toast.success('Opening new project dialog...')}
-          >
-            <div className="text-center">
-              <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center mx-auto mb-3">
-                <HiPlus className="w-6 h-6 text-slate-400" />
-              </div>
-              <p className="font-medium text-white">New Research Project</p>
-              <p className="text-sm text-slate-400">Organize your research</p>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Bookmarks */}
-      {activeTab === 'bookmarks' && (
-        <div className="card">
-          <div className="space-y-3">
-            {bookmarks.map((bookmark, index) => (
-              <motion.div
-                key={bookmark.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="flex items-center justify-between p-4 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors cursor-pointer"
+          {/* Quick Search Examples */}
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs text-slate-500">Try:</span>
+            {['habeas corpus', 'Fourth Amendment', 'negligence', 'employment discrimination'].map((example) => (
+              <button
+                key={example}
+                onClick={() => setSearchQuery(example)}
+                className="px-3 py-1.5 rounded-lg text-xs bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                    <HiStar className="w-5 h-5 text-amber-400" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-white">{bookmark.title}</p>
-                    <p className="text-sm text-slate-400">{bookmark.type} • Saved {bookmark.date}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
-                    <HiExternalLink className="w-5 h-5" />
-                  </button>
-                  <button className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
-                    <HiDownload className="w-5 h-5" />
-                  </button>
-                </div>
-              </motion.div>
+                {example}
+              </button>
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Results Stats */}
+      {totalResults > 0 && (
+        <div className="flex items-center gap-4 text-sm text-slate-400">
+          <span className="flex items-center gap-2">
+            <HiCheckCircle className="w-5 h-5 text-emerald-400" />
+            Found <span className="font-bold text-white">{totalResults.toLocaleString()}</span> total results
+          </span>
+          <span className="text-slate-600">•</span>
+          <span>Showing {searchResults.length} cases</span>
+          <span className="text-slate-600">•</span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            CourtListener API
+          </span>
+        </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card">
+      {/* Search Results */}
+      <div className="space-y-4">
+        {searchResults.map((result, index) => (
+          <motion.div
+            key={`${result.case_id}-${index}`}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.05 }}
+            className="card hover:border-primary-500/50 cursor-pointer group"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4 flex-1">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary-500/20 group-hover:bg-primary-500/30 transition-colors">
+                  <FaGavel className="w-6 h-6 text-primary-400" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className={`px-2 py-1 rounded-md text-xs font-medium border ${getCourtBadgeColor(result.court || 'Unknown')}`}>
+                      {result.court || 'Unknown Court'}
+                    </span>
+                    {result.docket_number && result.docket_number !== 'N/A' && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-xs text-slate-500">Docket: {result.docket_number}</span>
+                      </>
+                    )}
+                  </div>
+
+                  <h3 className="text-lg font-semibold text-white mb-2 group-hover:text-primary-400 transition-colors">
+                    {result.title || 'Untitled Case'}
+                  </h3>
+
+                  {result.citation && result.citation !== 'No citation' && (
+                    <div className="text-sm text-slate-300 mb-2 font-mono">
+                      📜 {result.citation}
+                    </div>
+                  )}
+
+                  {result.summary && result.summary !== 'No summary available' && (
+                    <p className="text-slate-400 text-sm line-clamp-2 mb-3">
+                      {result.summary}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-4">
+                    <span className="text-xs text-slate-500 flex items-center gap-1">
+                      <HiClock className="w-4 h-4" />
+                      {formatDate(result.date)}
+                    </span>
+                    <span className="text-xs text-emerald-400 flex items-center gap-1">
+                      <HiCheckCircle className="w-4 h-4" />
+                      {result.data_source || 'CourtListener API'}
+                    </span>
+                    {result.case_id && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-xs text-slate-500">ID: {result.case_id}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col items-end gap-2">
+                {result.url && (
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-ghost flex items-center gap-2 text-sm"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <HiExternalLink className="w-4 h-4" />
+                    View Case
+                  </a>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        ))}
+
+        {/* Empty State */}
+        {!isSearching && searchResults.length === 0 && !totalResults && (
+          <div className="card text-center py-16">
+            <FaBalanceScale className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">Search US Case Law</h3>
+            <p className="text-slate-400 max-w-md mx-auto mb-4">
+              Access millions of court opinions from CourtListener API - the same database used by lawyers and legal researchers.
+            </p>
+            <div className="flex flex-col gap-2 text-sm text-slate-500 max-w-lg mx-auto">
+              <p className="flex items-center justify-center gap-2">
+                <HiCheckCircle className="w-5 h-5 text-emerald-400" />
+                Supreme Court, Circuit Courts, District Courts
+              </p>
+              <p className="flex items-center justify-center gap-2">
+                <HiCheckCircle className="w-5 h-5 text-emerald-400" />
+                Real-time data from PACER and court records
+              </p>
+              <p className="flex items-center justify-center gap-2">
+                <HiCheckCircle className="w-5 h-5 text-emerald-400" />
+                Free access to millions of opinions
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* No Results Found */}
+        {!isSearching && searchResults.length === 0 && totalResults === 0 && searchQuery && (
+          <div className="card text-center py-12">
+            <HiXCircle className="w-12 h-12 text-slate-500 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold text-white mb-2">No Cases Found</h3>
+            <p className="text-slate-400 max-w-md mx-auto">
+              Try different search terms, adjust filters, or search for common legal topics.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Info Panel */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="card bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
               <HiScale className="w-5 h-5 text-primary-400" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">1,247</p>
-              <p className="text-sm text-slate-400">Cases Researched</p>
+              <p className="text-xs text-slate-400 uppercase tracking-wide">Data Source</p>
+              <p className="text-sm font-semibold text-white">CourtListener API</p>
             </div>
           </div>
         </div>
-        <div className="card">
+
+        <div className="card bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-500/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-secondary-500/20 flex items-center justify-center">
-              <HiDocumentText className="w-5 h-5 text-secondary-400" />
+            <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+              <HiCheckCircle className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">70</p>
-              <p className="text-sm text-slate-400">Documents Saved</p>
+              <p className="text-xs text-slate-400 uppercase tracking-wide">Coverage</p>
+              <p className="text-sm font-semibold text-white">Millions of Opinions</p>
             </div>
           </div>
         </div>
-        <div className="card">
+
+        <div className="card bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-500/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-              <HiClock className="w-5 h-5 text-amber-400" />
+            <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+              <HiLibrary className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">48h</p>
-              <p className="text-sm text-slate-400">Research Time Saved</p>
+              <p className="text-xs text-slate-400 uppercase tracking-wide">Access</p>
+              <p className="text-sm font-semibold text-white">FREE Forever</p>
             </div>
           </div>
         </div>
       </div>
+
     </div>
   );
 };

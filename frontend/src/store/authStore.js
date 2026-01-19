@@ -23,7 +23,6 @@ export const useAuthStore = create(
               isLoading: false 
             });
           } catch (error) {
-            console.error('Auth initialization failed:', error);
             set({ user: null, token: null, refreshToken: null, isAuthenticated: false, isLoading: false });
           }
         } else if (token === 'demo-token') {
@@ -70,8 +69,6 @@ export const useAuthStore = create(
             message: `Welcome back, ${transformUserResponse(userResponse.data).firstName || 'User'}!`
           };
         } catch (error) {
-          console.error('Login error:', error);
-
           // Clear any partial state
           set({
             user: null,
@@ -125,7 +122,6 @@ export const useAuthStore = create(
             message: 'Account created successfully! Please login to continue.'
           };
         } catch (error) {
-          console.error('Registration error:', error);
           return {
             success: false,
             error: error.response?.data?.detail || 'Registration failed. Please try again.'
@@ -135,6 +131,12 @@ export const useAuthStore = create(
 
       // Logout
       logout: () => {
+        // Clear Plaid banking data on logout
+        localStorage.removeItem('plaid_access_token');
+        localStorage.removeItem('plaid_item_id');
+        localStorage.removeItem('plaid_accounts');
+        localStorage.removeItem('plaid_transactions');
+
         set({
           user: null,
           token: null,
@@ -162,7 +164,6 @@ export const useAuthStore = create(
           });
           return true;
         } catch (error) {
-          console.error('Token refresh failed:', error);
           get().logout();
           return false;
         }

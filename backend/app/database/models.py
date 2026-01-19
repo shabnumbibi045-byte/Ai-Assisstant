@@ -81,10 +81,26 @@ class TravelBooking(Base):
     booking_data = Column(JSON)
 
 
+class PlaidAccount(Base):
+    """Plaid connected accounts - stores access tokens securely."""
+    __tablename__ = "plaid_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(255), index=True, nullable=False)
+    access_token = Column(Text, nullable=False)  # TODO: Encrypt this in production
+    item_id = Column(String(255), unique=True, nullable=False)
+    institution_id = Column(String(255))
+    institution_name = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_synced = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    account_data = Column(JSON)  # Cache account list
+
+
 class BankingMetadata(Base):
     """Banking account metadata (NO SENSITIVE DATA)."""
     __tablename__ = "banking_metadata"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(255), index=True, nullable=False)
     account_id = Column(String(255), index=True)

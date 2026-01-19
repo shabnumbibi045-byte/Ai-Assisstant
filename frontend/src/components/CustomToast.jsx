@@ -5,15 +5,12 @@ const toasts = [];
 let setToastsCallback = null;
 
 export const showToast = (message, type = 'error') => {
-  console.log('showToast called:', message, type, 'callback exists:', !!setToastsCallback);
   const id = ++toastId;
   const newToast = { id, message, type };
 
   toasts.push(newToast);
   if (setToastsCallback) {
     setToastsCallback([...toasts]);
-  } else {
-    console.warn('Toast callback not set yet, toast will not display!');
   }
 
   // Auto remove after 4 seconds
@@ -36,17 +33,11 @@ const CustomToast = () => {
   const [activeToasts, setActiveToasts] = useState([]);
 
   useEffect(() => {
-    console.log('CustomToast mounted, setting callback');
     setToastsCallback = setActiveToasts;
     return () => {
-      console.log('CustomToast unmounting');
       setToastsCallback = null;
     };
   }, []);
-
-  useEffect(() => {
-    console.log('Active toasts changed:', activeToasts);
-  }, [activeToasts]);
 
   return (
     <div style={{
