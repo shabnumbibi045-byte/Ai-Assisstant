@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/authStore';
 import {
   HiTrendingUp,
   HiTrendingDown,
@@ -37,6 +38,7 @@ ChartJS.register(
 );
 
 const Stocks = () => {
+  const { token, isAuthenticated } = useAuthStore();
   const [activeTab, setActiveTab] = useState('portfolio');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -69,11 +71,10 @@ const Stocks = () => {
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
 
   // Fetch real-time stock quote from backend
-  const fetchStockQuote = async (symbol) => {
+  const fetchStockQuote = async (symbol, showErrors = false) => {
     try {
-      const token = localStorage.getItem('access_token');
-
       if (!token) {
+        if (showErrors) toast.error('Please login to view stock data');
         return null;
       }
 
@@ -85,12 +86,21 @@ const Stocks = () => {
       });
 
       if (!response.ok) {
+        if (showErrors) {
+          if (response.status === 401) {
+            toast.error('Session expired. Please login again.');
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            toast.error(`Failed to fetch ${symbol}: ${errorData.detail || response.statusText}`);
+          }
+        }
         return null;
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
+      if (showErrors) toast.error(`Error fetching ${symbol}: ${error.message}`);
       return null;
     }
   };
@@ -98,57 +108,82 @@ const Stocks = () => {
   // Load real-time data for all stocks
   useEffect(() => {
     const loadRealTimeData = async () => {
-      // Update portfolio with real prices
-      const updatedPortfolio = await Promise.all(
-        portfolio.map(async (stock) => {
-          const quote = await fetchStockQuote(stock.symbol);
+      if (!token) {
+        toast.error('Not authenticated. Please log out and log back in.');
+        return;
+      }
 
-          if (quote) {
-            return {
-              ...stock,
-              name: quote.company_name || stock.name,
-              currentPrice: quote.price,
-              change: quote.change_percent,
-              latest_trading_day: quote.latest_trading_day || null,
-              isLoading: false,
-            };
-          }
-          return { ...stock, isLoading: false };
-        })
-      );
-      setPortfolio(updatedPortfolio);
+      // Alpha Vantage free tier: 5 API calls per minute
+      // Load data sequentially with 2-second delays between calls
+      const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-      // Update watchlist with real prices
-      const updatedWatchlist = await Promise.all(
-        watchlist.map(async (stock) => {
-          const quote = await fetchStockQuote(stock.symbol);
-          if (quote) {
-            return {
-              ...stock,
-              name: quote.company_name || stock.name,
-              price: quote.price,
-              change: quote.change_percent,
-              isLoading: false,
-            };
-          }
-          return { ...stock, isLoading: false };
-        })
-      );
-      setWatchlist(updatedWatchlist);
+      // Update portfolio stocks one by one
+      const updatedPortfolio = [...portfolio];
+      for (let i = 0; i < portfolio.length; i++) {
+        const stock = portfolio[i];
+        const quote = await fetchStockQuote(stock.symbol, i === 0);
 
-      // Update price alerts with real prices
-      const updatedAlerts = await Promise.all(
-        priceAlerts.map(async (alert) => {
-          const quote = await fetchStockQuote(alert.symbol);
-          if (quote) {
-            return {
-              ...alert,
-              currentPrice: quote.price,
-            };
-          }
-          return alert;
-        })
-      );
+        if (quote) {
+          updatedPortfolio[i] = {
+            ...stock,
+            name: quote.company_name || stock.name,
+            currentPrice: quote.price,
+            change: quote.change_percent,
+            latest_trading_day: quote.latest_trading_day || null,
+            isLoading: false,
+          };
+        } else {
+          updatedPortfolio[i] = { ...stock, isLoading: false };
+        }
+
+        // Update UI after each stock loads
+        setPortfolio([...updatedPortfolio]);
+
+        // Wait 2 seconds between API calls to respect rate limits
+        if (i < portfolio.length - 1) {
+          await delay(2000);
+        }
+      }
+
+      // Wait before loading watchlist
+      await delay(2000);
+
+      // Update watchlist stocks one by one
+      const updatedWatchlist = [...watchlist];
+      for (let i = 0; i < watchlist.length; i++) {
+        const stock = watchlist[i];
+        const quote = await fetchStockQuote(stock.symbol);
+
+        if (quote) {
+          updatedWatchlist[i] = {
+            ...stock,
+            name: quote.company_name || stock.name,
+            price: quote.price,
+            change: quote.change_percent,
+            isLoading: false,
+          };
+        } else {
+          updatedWatchlist[i] = { ...stock, isLoading: false };
+        }
+
+        setWatchlist([...updatedWatchlist]);
+
+        if (i < watchlist.length - 1) {
+          await delay(2000);
+        }
+      }
+
+      // Update price alerts (reuse portfolio data where possible)
+      const updatedAlerts = priceAlerts.map(alert => {
+        const portfolioStock = updatedPortfolio.find(s => s.symbol === alert.symbol);
+        if (portfolioStock && portfolioStock.currentPrice) {
+          return {
+            ...alert,
+            currentPrice: portfolioStock.currentPrice,
+          };
+        }
+        return alert;
+      });
       setPriceAlerts(updatedAlerts);
     };
 
@@ -247,59 +282,60 @@ const Stocks = () => {
     setIsLoading(true);
 
     try {
-      // Refresh portfolio prices
-      const updatedPortfolio = await Promise.all(
-        portfolio.map(async (stock) => {
-          const quote = await fetchStockQuote(stock.symbol);
-          if (quote) {
-            return {
-              ...stock,
-              name: quote.company_name || stock.name,
-              currentPrice: quote.price,
-              change: quote.change_percent,
-              latest_trading_day: quote.latest_trading_day || stock.latest_trading_day,
-            };
-          }
-          return stock;
-        })
-      );
-      setPortfolio(updatedPortfolio);
+      const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-      // Refresh watchlist prices
-      const updatedWatchlist = await Promise.all(
-        watchlist.map(async (stock) => {
-          const quote = await fetchStockQuote(stock.symbol);
-          if (quote) {
-            return {
-              ...stock,
-              name: quote.company_name || stock.name,
-              price: quote.price,
-              change: quote.change_percent,
-            };
-          }
-          return stock;
-        })
-      );
-      setWatchlist(updatedWatchlist);
+      // Refresh portfolio prices sequentially
+      const updatedPortfolio = [...portfolio];
+      for (let i = 0; i < portfolio.length; i++) {
+        const stock = portfolio[i];
+        const quote = await fetchStockQuote(stock.symbol, i === 0);
+        if (quote) {
+          updatedPortfolio[i] = {
+            ...stock,
+            name: quote.company_name || stock.name,
+            currentPrice: quote.price,
+            change: quote.change_percent,
+            latest_trading_day: quote.latest_trading_day || stock.latest_trading_day,
+          };
+        }
+        setPortfolio([...updatedPortfolio]);
+        if (i < portfolio.length - 1) await delay(2000);
+      }
 
-      // Refresh alerts
-      const updatedAlerts = await Promise.all(
-        priceAlerts.map(async (alert) => {
-          const quote = await fetchStockQuote(alert.symbol);
-          if (quote) {
-            return {
-              ...alert,
-              currentPrice: quote.price,
-            };
-          }
-          return alert;
-        })
-      );
+      await delay(2000);
+
+      // Refresh watchlist prices sequentially
+      const updatedWatchlist = [...watchlist];
+      for (let i = 0; i < watchlist.length; i++) {
+        const stock = watchlist[i];
+        const quote = await fetchStockQuote(stock.symbol);
+        if (quote) {
+          updatedWatchlist[i] = {
+            ...stock,
+            name: quote.company_name || stock.name,
+            price: quote.price,
+            change: quote.change_percent,
+          };
+        }
+        setWatchlist([...updatedWatchlist]);
+        if (i < watchlist.length - 1) await delay(2000);
+      }
+
+      // Refresh alerts (reuse portfolio data)
+      const updatedAlerts = priceAlerts.map(alert => {
+        const portfolioStock = updatedPortfolio.find(s => s.symbol === alert.symbol);
+        if (portfolioStock && portfolioStock.currentPrice) {
+          return {
+            ...alert,
+            currentPrice: portfolioStock.currentPrice,
+          };
+        }
+        return alert;
+      });
       setPriceAlerts(updatedAlerts);
 
       toast.success('Real-time stock data refreshed from Alpha Vantage');
     } catch (error) {
-      console.error('Error refreshing stock data:', error);
       toast.error('Failed to refresh stock data');
     }
 
