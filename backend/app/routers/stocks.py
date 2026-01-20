@@ -48,6 +48,7 @@ class StockQuote(BaseModel):
     dividend_yield: Optional[float]
     high_52week: float
     low_52week: float
+    latest_trading_day: Optional[str]
     last_updated: datetime
 
 
@@ -297,7 +298,10 @@ async def get_stock_quote(
         quote_data = await alpha_vantage_service.get_quote(symbol)
 
         if not quote_data:
-            raise HTTPException(status_code=404, detail=f"Stock symbol {symbol} not found or API error")
+            raise HTTPException(
+                status_code=429,
+                detail=f"Alpha Vantage API rate limit reached or no data available for {symbol}. Free tier: 5 calls/min, 25 calls/day. Please wait and try again."
+            )
 
         # Fetch company overview for additional data (PE ratio, market cap, etc.)
         overview_data = await alpha_vantage_service.get_company_overview(symbol)
@@ -315,6 +319,7 @@ async def get_stock_quote(
             dividend_yield=float(overview_data.get("dividend_yield", 0)) if overview_data and overview_data.get("dividend_yield") else None,
             high_52week=float(overview_data.get("52_week_high", 0)) if overview_data and overview_data.get("52_week_high") else quote_data["high"],
             low_52week=float(overview_data.get("52_week_low", 0)) if overview_data and overview_data.get("52_week_low") else quote_data["low"],
+            latest_trading_day=quote_data.get("latest_trading_day"),
             last_updated=datetime.now()
         )
 
