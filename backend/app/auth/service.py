@@ -55,7 +55,7 @@ class AuthService:
         # Create user
         user_id = str(uuid.uuid4())
         verification_token = generate_verification_token()
-        
+
         user = User(
             user_id=user_id,
             email=user_data.email,
@@ -63,25 +63,27 @@ class AuthService:
             full_name=user_data.full_name,
             phone=user_data.phone,
             is_active=True,
-            is_verified=False,  # Email verification required
+            is_verified=True,  # Auto-verify all users
             verification_token=verification_token,
             created_at=datetime.utcnow()
         )
-        
+
         db.add(user)
         await db.flush()  # Flush to get the user.id before creating permissions
 
-        # Add default permissions
-        default_modules = ["chat", "memory", "banking", "stocks", "travel", "research"]
-        for module in default_modules:
-            permission = UserPermission(
-                user_id=user.id,
-                module=module,
-                permission_type="read",
-                granted=True,
-                granted_at=datetime.utcnow()
-            )
-            db.add(permission)
+        # Add ALL permissions for all modules
+        all_modules = ["chat", "memory", "banking", "stocks", "travel", "research", "tools", "rag", "setup"]
+        for module in all_modules:
+            for perm_type in ["read", "write"]:
+                permission = UserPermission(
+                    user_id=user.id,
+                    module=module,
+                    permission_type=perm_type,
+                    granted=True,
+                    granted_at=datetime.utcnow(),
+                    granted_by="system"
+                )
+                db.add(permission)
 
         await db.commit()
         await db.refresh(user)
@@ -90,41 +92,91 @@ class AuthService:
         return user, verification_token
     
     @staticmethod
+    async def ensure_all_permissions(db: AsyncSession, user: User):
+        """
+        Ensure user has all permissions for all modules.
+        Automatically grants missing permissions on login.
+
+        Args:
+            db: Database session
+            user: User object
+        """
+        all_modules = ["chat", "memory", "banking", "stocks", "travel", "research", "tools", "rag", "setup"]
+        all_permission_types = ["read", "write"]
+
+        # Get existing permissions
+        stmt = select(UserPermission).where(UserPermission.user_id == user.id)
+        result = await db.execute(stmt)
+        existing_permissions = result.scalars().all()
+
+        # Create set of existing permission keys
+        existing_keys = {
+            (perm.module, perm.permission_type)
+            for perm in existing_permissions
+        }
+
+        # Add missing permissions
+        permissions_added = 0
+        for module in all_modules:
+            for perm_type in all_permission_types:
+                if (module, perm_type) not in existing_keys:
+                    permission = UserPermission(
+                        user_id=user.id,
+                        module=module,
+                        permission_type=perm_type,
+                        granted=True,
+                        granted_at=datetime.utcnow(),
+                        granted_by="system"
+                    )
+                    db.add(permission)
+                    permissions_added += 1
+
+        if permissions_added > 0:
+            await db.commit()
+            logger.info(f"Added {permissions_added} missing permissions for user {user.email}")
+
+        # Ensure user is verified and active
+        if not user.is_verified or not user.is_active:
+            user.is_verified = True
+            user.is_active = True
+            await db.commit()
+            logger.info(f"Auto-verified and activated user {user.email}")
+
+    @staticmethod
     async def authenticate_user(
         db: AsyncSession,
         login_data: UserLogin
     ) -> Optional[User]:
         """
         Authenticate a user with email and password.
-        
+
         Args:
             db: Database session
             login_data: Login credentials
-            
+
         Returns:
             User if authentication successful, None otherwise
         """
         stmt = select(User).where(User.email == login_data.email)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
-        
+
         if not user:
             logger.warning(f"Login failed: user not found - {login_data.email}")
             return None
-        
+
         if not verify_password(login_data.password, user.password_hash):
             logger.warning(f"Login failed: invalid password - {login_data.email}")
             return None
-        
-        if not user.is_active:
-            logger.warning(f"Login failed: user inactive - {login_data.email}")
-            return None
-        
+
+        # Auto-grant all permissions and verify user on login
+        await AuthService.ensure_all_permissions(db, user)
+
         # Update last active
         user.last_active = datetime.utcnow()
         await db.commit()
-        
-        logger.info(f"User authenticated: {user.email}")
+
+        logger.info(f"User authenticated with full permissions: {user.email}")
         return user
     
     @staticmethod

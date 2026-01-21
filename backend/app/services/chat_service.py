@@ -7,7 +7,6 @@ from app.llm.provider_factory import ProviderFactory, ProviderType
 from app.prompts import get_prompt_for_module, BASE_SYSTEM_PROMPT
 from app.tools.tool_registry import ToolRegistry
 from app.services.knowledge_base_loader import knowledge_loader
-from app.services.demo_data_service import demo_data_service
 from app.rag.rag_pipeline import RAGPipeline
 from app.memory.vector_memory import VectorMemory
 from app.config import settings
@@ -77,12 +76,6 @@ class ChatService:
             final_system_prompt = base_prompt
             if rag_context:
                 final_system_prompt += f"\n\n**CONTEXT FROM USER'S DOCUMENTS:**\n{rag_context}"
-
-            # 4.5. Get demo data summary for the query
-            demo_data = demo_data_service.get_summary_for_query(request.message)
-            if demo_data:
-                final_system_prompt += f"\n\n**DEMO DATA (Use this in your response):**\n{demo_data}"
-                logger.info("Added demo data to prompt")
 
             # 5. Build messages
             messages = [
