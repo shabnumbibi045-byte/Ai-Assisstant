@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -14,9 +14,13 @@ import {
   HiPlus,
   HiX,
   HiLink,
+  HiDocumentDownload,
+  HiTable,
+  HiChevronDown,
 } from 'react-icons/hi';
 import PlaidLink from '../../components/PlaidLink';
 import plaidApi from '../../services/plaidApi';
+import api from '../../services/api';
 
 const Banking = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -26,6 +30,20 @@ const Banking = () => {
   const [plaidTransactions, setPlaidTransactions] = useState([]);
   const [connectedItems, setConnectedItems] = useState([]);
   const [dateRange, setDateRange] = useState('30');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const exportMenuRef = useRef(null);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Load saved Plaid data from localStorage on mount
   useEffect(() => {
@@ -164,6 +182,127 @@ const Banking = () => {
     window.URL.revokeObjectURL(url);
 
     toast.success('Transactions exported to CSV');
+  };
+
+  // Export to CSV from backend
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    setShowExportMenu(false);
+    try {
+      const response = await api.get('/banking/export/transactions/csv', {
+        params: { days: parseInt(dateRange) },
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transactions-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Transactions exported to CSV');
+    } catch (error) {
+      console.error('Export error:', error);
+      // Fallback to local export if backend fails
+      handleExport();
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export to Excel from backend
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    setShowExportMenu(false);
+    try {
+      const response = await api.get('/banking/export/transactions/excel', {
+        params: { days: parseInt(dateRange) },
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transactions-${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Transactions exported to Excel');
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export to Excel. Try CSV instead.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export full banking report (all accounts)
+  const handleExportFullReport = async () => {
+    setIsExporting(true);
+    setShowExportMenu(false);
+    try {
+      const response = await api.get('/banking/export/all-accounts/excel', {
+        params: { days: parseInt(dateRange) },
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `banking-report-${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Full banking report exported');
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export report');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export bank statement for specific account
+  const handleExportStatement = async (accountId, format = 'excel') => {
+    setIsExporting(true);
+    try {
+      const endpoint = format === 'csv' 
+        ? '/banking/export/statement/csv' 
+        : '/banking/export/statement/excel';
+      
+      const response = await api.get(endpoint, {
+        params: { account_id: accountId },
+        responseType: 'blob'
+      });
+      
+      const ext = format === 'csv' ? 'csv' : 'xlsx';
+      const mimeType = format === 'csv' 
+        ? 'text/csv' 
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      
+      const blob = new Blob([response.data], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `statement-${accountId}-${new Date().toISOString().split('T')[0]}.${ext}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`Statement exported to ${format.toUpperCase()}`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export statement');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Handle successful Plaid connection
@@ -361,10 +500,69 @@ const Banking = () => {
             <HiRefresh className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button onClick={handleExport} className="btn-primary flex items-center gap-2">
-            <HiDownload className="w-5 h-5" />
-            Export
-          </button>
+          
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportMenuRef}>
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)} 
+              disabled={isExporting}
+              className="btn-primary flex items-center gap-2"
+            >
+              {isExporting ? (
+                <HiRefresh className="w-5 h-5 animate-spin" />
+              ) : (
+                <HiDownload className="w-5 h-5" />
+              )}
+              Export
+              <HiChevronDown className={`w-4 h-4 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showExportMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="absolute right-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden"
+              >
+                <div className="p-2">
+                  <p className="text-xs text-slate-500 px-3 py-2 uppercase tracking-wider">Transactions</p>
+                  <button
+                    onClick={handleExportCSV}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-left text-white hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <HiDocumentDownload className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <p className="font-medium">Export to CSV</p>
+                      <p className="text-xs text-slate-400">Spreadsheet compatible</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleExportExcel}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-left text-white hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <HiTable className="w-5 h-5 text-blue-400" />
+                    <div>
+                      <p className="font-medium">Export to Excel</p>
+                      <p className="text-xs text-slate-400">Formatted with styles</p>
+                    </div>
+                  </button>
+                  
+                  <div className="border-t border-slate-700 my-2"></div>
+                  
+                  <p className="text-xs text-slate-500 px-3 py-2 uppercase tracking-wider">Reports</p>
+                  <button
+                    onClick={handleExportFullReport}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-left text-white hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <HiCurrencyDollar className="w-5 h-5 text-purple-400" />
+                    <div>
+                      <p className="font-medium">Full Banking Report</p>
+                      <p className="text-xs text-slate-400">All accounts & analytics</p>
+                    </div>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </div>
         </div>
       </div>
 
