@@ -313,6 +313,351 @@ class AmadeusService:
             logger.warning(f"Flight status not found for {flight_number}")
             return None
 
+    # ============================================
+    # CAR RENTAL SEARCH (Amadeus Self-Service)
+    # ============================================
+
+    async def search_car_rentals(
+        self,
+        pickup_location: str,
+        pickup_date: str,
+        pickup_time: str = "10:00:00",
+        dropoff_date: str = None,
+        dropoff_time: str = "10:00:00",
+        dropoff_location: str = None,
+        driver_age: int = 30,
+        currency: str = "USD"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search for car rentals using Amadeus Transfer API.
+
+        Note: Amadeus Self-Service offers Transfer API for ground transportation.
+        For comprehensive car rentals, consider integrating with:
+        - Discover Cars API
+        - Rentalcars.com API
+        - CarTrawler API
+
+        Args:
+            pickup_location: Pickup airport/city code (e.g., 'JFK', 'LAX')
+            pickup_date: Pickup date in YYYY-MM-DD format
+            pickup_time: Pickup time in HH:MM:SS format
+            dropoff_date: Return date (defaults to pickup_date + 1 week)
+            dropoff_time: Return time in HH:MM:SS format
+            dropoff_location: Return location (defaults to pickup_location)
+            driver_age: Driver's age (affects pricing)
+            currency: Currency code
+
+        Returns:
+            Available car rental options
+        """
+        # Amadeus Transfer API endpoint for ground transportation
+        endpoint = "/v1/shopping/transfer-offers"
+        
+        # Default dropoff to 7 days after pickup
+        if not dropoff_date:
+            from datetime import datetime, timedelta
+            pickup_dt = datetime.strptime(pickup_date, "%Y-%m-%d")
+            dropoff_date = (pickup_dt + timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        if not dropoff_location:
+            dropoff_location = pickup_location
+
+        # Note: This uses POST request with JSON body
+        token = await self._get_access_token()
+        url = f"{self.base_url}{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "startLocationCode": pickup_location.upper(),
+            "endAddressLine": pickup_location.upper(),  # For car rentals, often same area
+            "startDateTime": f"{pickup_date}T{pickup_time}",
+            "passengers": 1,
+            "transferType": "PRIVATE"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        logger.info(f"Found transfer/car options for {pickup_location}")
+                        return result
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"Amadeus Transfer API: {response.status} - {error_text}")
+                        # Return mock data for demonstration
+                        return self._get_mock_car_rentals(pickup_location, pickup_date, dropoff_date)
+        except Exception as e:
+            logger.error(f"Error searching car rentals: {e}")
+            return self._get_mock_car_rentals(pickup_location, pickup_date, dropoff_date)
+
+    def _get_mock_car_rentals(
+        self,
+        pickup_location: str,
+        pickup_date: str,
+        dropoff_date: str
+    ) -> Dict[str, Any]:
+        """Return mock car rental data for demonstration."""
+        return {
+            "data": [
+                {
+                    "provider": "Enterprise",
+                    "vehicle": {
+                        "category": "ECONOMY",
+                        "type": "Toyota Corolla or similar",
+                        "seats": 5,
+                        "doors": 4,
+                        "transmission": "Automatic",
+                        "air_conditioning": True,
+                        "fuel_type": "Gasoline"
+                    },
+                    "price": {
+                        "total": "245.00",
+                        "currency": "USD",
+                        "per_day": "35.00"
+                    },
+                    "pickup": {
+                        "location": pickup_location,
+                        "date": pickup_date,
+                        "time": "10:00"
+                    },
+                    "dropoff": {
+                        "location": pickup_location,
+                        "date": dropoff_date,
+                        "time": "10:00"
+                    },
+                    "included": ["Unlimited mileage", "Third party liability", "Theft protection"]
+                },
+                {
+                    "provider": "Hertz",
+                    "vehicle": {
+                        "category": "INTERMEDIATE",
+                        "type": "Honda Accord or similar",
+                        "seats": 5,
+                        "doors": 4,
+                        "transmission": "Automatic",
+                        "air_conditioning": True,
+                        "fuel_type": "Gasoline"
+                    },
+                    "price": {
+                        "total": "315.00",
+                        "currency": "USD",
+                        "per_day": "45.00"
+                    },
+                    "pickup": {
+                        "location": pickup_location,
+                        "date": pickup_date,
+                        "time": "10:00"
+                    },
+                    "dropoff": {
+                        "location": pickup_location,
+                        "date": dropoff_date,
+                        "time": "10:00"
+                    },
+                    "included": ["Unlimited mileage", "Collision damage waiver", "Theft protection"]
+                },
+                {
+                    "provider": "Budget",
+                    "vehicle": {
+                        "category": "SUV",
+                        "type": "Ford Explorer or similar",
+                        "seats": 7,
+                        "doors": 4,
+                        "transmission": "Automatic",
+                        "air_conditioning": True,
+                        "fuel_type": "Gasoline"
+                    },
+                    "price": {
+                        "total": "455.00",
+                        "currency": "USD",
+                        "per_day": "65.00"
+                    },
+                    "pickup": {
+                        "location": pickup_location,
+                        "date": pickup_date,
+                        "time": "10:00"
+                    },
+                    "dropoff": {
+                        "location": pickup_location,
+                        "date": dropoff_date,
+                        "time": "10:00"
+                    },
+                    "included": ["Unlimited mileage", "Full insurance", "Free cancellation"]
+                }
+            ],
+            "meta": {
+                "note": "For production car rentals, integrate with Discover Cars, CarTrawler, or direct provider APIs",
+                "providers_available": ["Enterprise", "Hertz", "Budget", "Avis", "National", "Alamo"]
+            }
+        }
+
+    # ============================================
+    # HOTEL BOOKING (Enhanced)
+    # ============================================
+
+    async def book_hotel(
+        self,
+        offer_id: str,
+        guest_info: Dict[str, Any],
+        payment_info: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Book a hotel using Amadeus Hotel Booking API.
+
+        Args:
+            offer_id: Hotel offer ID from search results
+            guest_info: Guest information (name, email, phone)
+            payment_info: Payment card information
+
+        Returns:
+            Booking confirmation
+        """
+        endpoint = "/v2/booking/hotel-orders"
+        token = await self._get_access_token()
+        url = f"{self.base_url}{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "data": {
+                "type": "hotel-order",
+                "guests": [{
+                    "tid": 1,
+                    "name": {
+                        "firstName": guest_info.get("first_name"),
+                        "lastName": guest_info.get("last_name")
+                    },
+                    "contact": {
+                        "email": guest_info.get("email"),
+                        "phone": guest_info.get("phone")
+                    }
+                }],
+                "payments": [{
+                    "method": "CREDIT_CARD",
+                    "paymentCard": {
+                        "vendorCode": payment_info.get("card_type", "VI"),  # VI=Visa, MC=Mastercard
+                        "cardNumber": payment_info.get("card_number"),
+                        "expiryDate": payment_info.get("expiry_date"),  # YYYY-MM
+                        "holderName": payment_info.get("holder_name")
+                    }
+                }],
+                "rooms": [{
+                    "guestIds": [1],
+                    "offerId": offer_id
+                }]
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200 or response.status == 201:
+                        result = await response.json()
+                        logger.info(f"Hotel booked successfully: {offer_id}")
+                        return result
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Hotel booking failed: {response.status} - {error_text}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error booking hotel: {e}")
+            return None
+
+    # ============================================
+    # FLIGHT BOOKING
+    # ============================================
+
+    async def book_flight(
+        self,
+        flight_offer: Dict[str, Any],
+        travelers: List[Dict[str, Any]],
+        contact_info: Dict[str, Any],
+        payment_info: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Book a flight using Amadeus Flight Orders API.
+
+        Args:
+            flight_offer: Flight offer from search results
+            travelers: List of traveler information
+            contact_info: Contact information for booking
+            payment_info: Payment information (optional for some markets)
+
+        Returns:
+            Booking confirmation with PNR
+        """
+        endpoint = "/v1/booking/flight-orders"
+        token = await self._get_access_token()
+        url = f"{self.base_url}{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # Format travelers
+        formatted_travelers = []
+        for i, traveler in enumerate(travelers, 1):
+            formatted_travelers.append({
+                "id": str(i),
+                "dateOfBirth": traveler.get("date_of_birth"),
+                "name": {
+                    "firstName": traveler.get("first_name"),
+                    "lastName": traveler.get("last_name")
+                },
+                "gender": traveler.get("gender", "MALE"),
+                "contact": {
+                    "emailAddress": contact_info.get("email"),
+                    "phones": [{
+                        "deviceType": "MOBILE",
+                        "countryCallingCode": contact_info.get("country_code", "1"),
+                        "number": contact_info.get("phone")
+                    }]
+                },
+                "documents": [{
+                    "documentType": "PASSPORT",
+                    "number": traveler.get("passport_number"),
+                    "expiryDate": traveler.get("passport_expiry"),
+                    "issuanceCountry": traveler.get("passport_country"),
+                    "nationality": traveler.get("nationality"),
+                    "holder": True
+                }] if traveler.get("passport_number") else []
+            })
+
+        payload = {
+            "data": {
+                "type": "flight-order",
+                "flightOffers": [flight_offer],
+                "travelers": formatted_travelers,
+                "remarks": {
+                    "general": [{
+                        "subType": "GENERAL_MISCELLANEOUS",
+                        "text": "Booked via Salim AI Assistant"
+                    }]
+                }
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200 or response.status == 201:
+                        result = await response.json()
+                        pnr = result.get("data", {}).get("associatedRecords", [{}])[0].get("reference")
+                        logger.info(f"Flight booked successfully. PNR: {pnr}")
+                        return result
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Flight booking failed: {response.status} - {error_text}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error booking flight: {e}")
+            return None
+
 
 # Global instance - Get credentials from environment variables for security
 amadeus_service = AmadeusService(

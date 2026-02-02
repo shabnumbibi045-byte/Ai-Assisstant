@@ -49,6 +49,12 @@ plaid-python>=18.0.0
 # Data Processing
 numpy>=2.0.0
 
+# WebSocket support (for OpenAI Realtime API)
+websockets>=12.0
+
+# Audio processing (for voice features)
+pydub>=0.25.1
+
 # Production Server
 gunicorn>=21.2.0
 

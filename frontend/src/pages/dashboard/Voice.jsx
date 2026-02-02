@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -11,6 +11,10 @@ import {
   HiSparkles,
   HiChat,
 } from 'react-icons/hi';
+import { voiceAPI } from '../../services/api';
+
+// Browser Speech Recognition
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const Voice = () => {
   const [isListening, setIsListening] = useState(false);
@@ -21,15 +25,13 @@ const Voice = () => {
   const [selectedVoice, setSelectedVoice] = useState('alloy');
   const [selectedLanguage, setSelectedLanguage] = useState('en');
   const [volume, setVolume] = useState(80);
-  const [history, setHistory] = useState([
-    { id: 1, type: 'user', text: 'What are my banking balances?', time: '10:30 AM' },
-    { id: 2, type: 'ai', text: 'Your total balance across all accounts is $140,920.50. TD Canada Trust has $15,420.50...', time: '10:30 AM' },
-    { id: 3, type: 'user', text: 'Send an email to John about the meeting', time: '10:35 AM' },
-    { id: 4, type: 'ai', text: 'I\'ve drafted an email to John Smith regarding the meeting. Would you like me to send it?', time: '10:35 AM' },
-  ]);
+  const [history, setHistory] = useState([]);
+  const [recognitionSupported, setRecognitionSupported] = useState(true);
 
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const audioRef = useRef(null);
 
   const voices = [
     { id: 'alloy', name: 'Alloy', description: 'Neutral & balanced' },
@@ -47,6 +49,72 @@ const Voice = () => {
     { code: 'de', name: 'German' },
     { code: 'sw', name: 'Swahili' },
   ];
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    if (!SpeechRecognition) {
+      setRecognitionSupported(false);
+      toast.error('Speech recognition not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = selectedLanguage === 'en' ? 'en-US' : selectedLanguage;
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcriptPart = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcriptPart;
+        } else {
+          interimTranscript += transcriptPart;
+        }
+      }
+
+      setTranscript(finalTranscript || interimTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      if (event.error === 'not-allowed') {
+        toast.error('Microphone access denied. Please allow microphone access.');
+      } else if (event.error !== 'aborted') {
+        toast.error(`Speech recognition error: ${event.error}`);
+      }
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      if (isListening) {
+        // Auto-restart if still supposed to be listening
+        try {
+          recognition.start();
+        } catch (e) {
+          // Ignore - already started
+        }
+      }
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [selectedLanguage]);
+
+  // Update recognition language when changed
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = selectedLanguage === 'en' ? 'en-US' : selectedLanguage;
+    }
+  }, [selectedLanguage]);
 
   // Audio visualization
   useEffect(() => {
@@ -101,45 +169,129 @@ const Voice = () => {
     };
   }, [isListening, isSpeaking]);
 
-  const handleStartListening = () => {
-    setIsListening(true);
-    setTranscript('');
-    toast.success('Listening...');
+  // Process voice command via backend API
+  const processVoiceCommand = useCallback(async (text) => {
+    if (!text.trim()) return;
 
-    // Simulate speech recognition
-    setTimeout(() => {
-      setTranscript('Check my TD Canada Trust account balance');
-    }, 2000);
-
-    setTimeout(() => {
-      handleStopListening();
-    }, 3000);
-  };
-
-  const handleStopListening = async () => {
-    setIsListening(false);
     setIsProcessing(true);
+    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Simulate AI processing
-    await new Promise(r => setTimeout(r, 1500));
-
-    const response = 'Your TD Canada Trust checking account has a balance of $15,420.50 CAD. The account is up 2.3% this month.';
-    setAiResponse(response);
-    setIsProcessing(false);
-
-    // Add to history
+    // Add user message to history
     setHistory(prev => [
       ...prev,
-      { id: Date.now(), type: 'user', text: transcript || 'Check my TD Canada Trust account balance', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
-      { id: Date.now() + 1, type: 'ai', text: response, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+      { id: Date.now(), type: 'user', text: text, time: currentTime }
     ]);
 
-    // Simulate text-to-speech
+    try {
+      // Call backend voice command API
+      const response = await voiceAPI.processCommand({
+        user_id: 'current_user',
+        text: text
+      });
+
+      const aiText = response.data.response_text;
+      setAiResponse(aiText);
+
+      // Add AI response to history
+      setHistory(prev => [
+        ...prev,
+        { id: Date.now() + 1, type: 'ai', text: aiText, time: currentTime }
+      ]);
+
+      // Text-to-speech for the response
+      await speakResponse(aiText);
+
+    } catch (error) {
+      console.error('Voice command error:', error);
+      const errorMsg = 'Sorry, I encountered an error processing your command.';
+      setAiResponse(errorMsg);
+      toast.error('Failed to process voice command');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [selectedVoice]);
+
+  // Text-to-Speech using browser API (backup) or backend
+  const speakResponse = useCallback(async (text) => {
     setIsSpeaking(true);
-    setTimeout(() => {
-      setIsSpeaking(false);
-    }, 4000);
-  };
+
+    try {
+      // Try backend TTS first
+      const response = await voiceAPI.textToSpeech(text, selectedVoice);
+      
+      // If we get an audio URL, we could play it (but mock returns fake URL)
+      // For now, use browser's built-in TTS as fallback
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.volume = volume / 100;
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        
+        utterance.onend = () => {
+          setIsSpeaking(false);
+        };
+        
+        utterance.onerror = () => {
+          setIsSpeaking(false);
+        };
+
+        window.speechSynthesis.speak(utterance);
+      } else {
+        // No TTS available, just show text
+        setTimeout(() => setIsSpeaking(false), 2000);
+      }
+    } catch (error) {
+      console.error('TTS error:', error);
+      // Fallback to browser TTS
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.volume = volume / 100;
+        utterance.onend = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+      } else {
+        setIsSpeaking(false);
+      }
+    }
+  }, [selectedVoice, volume]);
+
+  const handleStartListening = useCallback(() => {
+    if (!recognitionSupported) {
+      toast.error('Speech recognition not supported');
+      return;
+    }
+
+    setTranscript('');
+    setAiResponse('');
+    setIsListening(true);
+    toast.success('Listening...');
+
+    try {
+      recognitionRef.current?.start();
+    } catch (e) {
+      // Already started
+    }
+  }, [recognitionSupported]);
+
+  const handleStopListening = useCallback(async () => {
+    setIsListening(false);
+    
+    try {
+      recognitionRef.current?.stop();
+    } catch (e) {
+      // Already stopped
+    }
+
+    // Process the transcript
+    if (transcript.trim()) {
+      await processVoiceCommand(transcript);
+    }
+  }, [transcript, processVoiceCommand]);
+
+  // Quick command handler
+  const handleQuickCommand = useCallback(async (commandText) => {
+    setTranscript(commandText);
+    await processVoiceCommand(commandText);
+  }, [processVoiceCommand]);
 
   return (
     <div className="space-y-6">
@@ -266,11 +418,9 @@ const Voice = () => {
                   key={index}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setTranscript(cmd.text);
-                    toast.success(`Command: "${cmd.text}"`);
-                  }}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors text-left"
+                  onClick={() => handleQuickCommand(cmd.text)}
+                  disabled={isProcessing}
+                  className={`flex items-center gap-3 p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors text-left ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span className="text-2xl">{cmd.icon}</span>
                   <span className="text-white text-sm">{cmd.text}</span>

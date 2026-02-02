@@ -87,8 +87,25 @@ class Settings(BaseSettings):
     PLAID_SECRET: Optional[str] = None
     PLAID_ENV: str = "sandbox"  # sandbox, development, production
     
+    # Plaid Investments (Brokerage Integration - Schwab, Fidelity, etc.)
+    PLAID_INVESTMENTS_ENABLED: bool = True
+    
+    # Lean Technologies (UAE/Middle East banking aggregator)
+    # Covers: FAB Bank, RAK Bank, ENBD, ADCB, and more UAE/Saudi banks
+    # Apply at: https://www.leantech.me/
+    LEAN_APP_TOKEN: Optional[str] = None
+    LEAN_APP_SECRET: Optional[str] = None
+    LEAN_ENV: str = "sandbox"  # sandbox, production
+    
+    # Mono (Africa banking aggregator - Kenya, Nigeria, etc.)
+    # Covers: I&M Bank, Equity Bank, KCB, and more African banks
+    # Apply at: https://mono.co/
+    MONO_SECRET_KEY: Optional[str] = None
+    MONO_PUBLIC_KEY: Optional[str] = None
+    MONO_WEBHOOK_SECRET: Optional[str] = None
+    
     # Supported countries for banking
-    BANKING_COUNTRIES: List[str] = ["CA", "US", "KE"]  # Canada, US, Kenya
+    BANKING_COUNTRIES: List[str] = ["CA", "US", "KE", "AE"]  # Canada, US, Kenya, UAE
     
     # Export Settings
     EXPORT_DIR: str = "./exports"
@@ -106,9 +123,19 @@ class Settings(BaseSettings):
     ALPACA_SECRET_KEY: Optional[str] = None
     ALPACA_BASE_URL: str = "https://paper-api.alpaca.markets"  # paper trading
     
-    # Interactive Brokers
+    # Charles Schwab Developer API (read-only portfolio access)
+    # Apply at: https://developer.schwab.com/
+    SCHWAB_CLIENT_ID: Optional[str] = None
+    SCHWAB_CLIENT_SECRET: Optional[str] = None
+    SCHWAB_REFRESH_TOKEN: Optional[str] = None
+    SCHWAB_ACCOUNT_ID: Optional[str] = None
+    
+    # Interactive Brokers Client Portal API
+    # Docs: https://www.interactivebrokers.com/api/doc.html
     IB_ACCOUNT_ID: Optional[str] = None
     IB_API_PORT: int = 7497
+    IB_GATEWAY_HOST: str = "localhost"
+    IB_CLIENT_ID: int = 1
     
     # Stock data providers
     ALPHA_VANTAGE_API_KEY: Optional[str] = None
@@ -162,12 +189,28 @@ class Settings(BaseSettings):
     # ===========================================
     # VOICE CONFIGURATION
     # ===========================================
-    # Speech-to-Text
+    # OpenAI Realtime API (Recommended - handles both STT and TTS)
+    # Single multimodal stream with low-latency, barge-in support
+    # No separate STT service needed - processes audio directly
+    OPENAI_REALTIME_ENABLED: bool = True
+    OPENAI_REALTIME_MODEL: str = "gpt-4o-realtime-preview-2024-12-17"
+    OPENAI_REALTIME_VOICE: str = "alloy"  # alloy, echo, shimmer, ash, ballad, coral, sage, verse
+    
+    # ElevenLabs (Alternative TTS - premium voice quality)
+    # Pricing: https://elevenlabs.io/pricing
+    # - Free: 10,000 chars/month
+    # - Starter ($5/mo): 30,000 chars/month  
+    # - Creator ($22/mo): 100,000 chars/month
+    # - Pro ($99/mo): 500,000 chars/month
+    ELEVENLABS_API_KEY: Optional[str] = None
+    ELEVENLABS_VOICE_ID: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
+    ELEVENLABS_MODEL_ID: str = "eleven_turbo_v2_5"
+    
+    # Speech-to-Text (Fallback when not using Realtime API)
     WHISPER_MODEL: str = "whisper-1"  # OpenAI Whisper
     DEEPGRAM_API_KEY: Optional[str] = None
     
-    # Text-to-Speech
-    ELEVENLABS_API_KEY: Optional[str] = None
+    # Legacy TTS Voice ID
     TTS_VOICE_ID: str = "default"
     
     # ===========================================
