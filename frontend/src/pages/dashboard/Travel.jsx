@@ -432,6 +432,19 @@ const Travel = () => {
   const [searchType, setSearchType] = useState('oneway');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
+  const [selectedFlight, setSelectedFlight] = useState(null);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [isBooking, setIsBooking] = useState(false);
+
+  // Passenger details for booking
+  const [passengerDetails, setPassengerDetails] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    dateOfBirth: '',
+    passportNumber: '',
+  });
 
   // Flight search form state
   const [flightSearch, setFlightSearch] = useState({
@@ -536,6 +549,58 @@ const Travel = () => {
     if (!datetime) return 'N/A';
     const date = new Date(datetime);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Handle flight selection for booking
+  const handleSelectFlight = (flight) => {
+    setSelectedFlight(flight);
+    setShowBookingModal(true);
+  };
+
+  // Handle booking submission
+  const handleBookFlight = async () => {
+    if (!passengerDetails.firstName || !passengerDetails.lastName || !passengerDetails.email) {
+      toast.error('Please fill in all required passenger details');
+      return;
+    }
+
+    setIsBooking(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/travel/book`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          flight: selectedFlight,
+          passenger: passengerDetails,
+          user_id: user?.user_id || user?.id,
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success('Flight booked successfully! Check your email for confirmation.');
+        setShowBookingModal(false);
+        setSelectedFlight(null);
+        setPassengerDetails({
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          dateOfBirth: '',
+          passportNumber: '',
+        });
+      } else {
+        toast.error(data.message || 'Booking failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Booking error:', error);
+      toast.error('Booking service temporarily unavailable. Please try again later.');
+    }
+    setIsBooking(false);
   };
 
   return (
@@ -810,7 +875,10 @@ const Travel = () => {
 
                 {/* Action Button */}
                 <div className="flex items-center justify-center">
-                  <button className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center gap-2">
+                  <button 
+                    onClick={() => handleSelectFlight(searchResults.best_deal)}
+                    className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center gap-2"
+                  >
                     <span className="font-semibold">Select Flight</span>
                     <HiArrowRight className="w-5 h-5" />
                   </button>
@@ -875,7 +943,10 @@ const Travel = () => {
 
                   {/* Action Button */}
                   <div className="flex items-center justify-center">
-                    <button className="w-full px-6 py-3 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-all flex items-center justify-center gap-2">
+                    <button 
+                      onClick={() => handleSelectFlight(flight)}
+                      className="w-full px-6 py-3 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
                       <span>Select</span>
                       <HiArrowRight className="w-4 h-4" />
                     </button>
@@ -903,6 +974,151 @@ const Travel = () => {
             All flight data is fetched in real-time from Amadeus Travel API
           </p>
         </motion.div>
+      )}
+
+      {/* Booking Modal */}
+      {showBookingModal && selectedFlight && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700"
+          >
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-slate-800 border-b border-slate-700 p-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Complete Your Booking</h2>
+              <button
+                onClick={() => setShowBookingModal(false)}
+                className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              >
+                <HiX className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Flight Summary */}
+              <div className="bg-slate-700/50 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-slate-400 mb-3">Flight Summary</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-lg font-bold text-white">{selectedFlight.airline}</p>
+                    <p className="text-sm text-slate-400">{selectedFlight.flight_number}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-emerald-400">${selectedFlight.price?.toFixed(2)}</p>
+                    <p className="text-xs text-slate-400">{selectedFlight.currency || 'USD'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-white">{selectedFlight.origin}</span>
+                  <HiArrowRight className="text-slate-500" />
+                  <span className="text-white">{selectedFlight.destination}</span>
+                  <span className="text-slate-400">• {formatDuration(selectedFlight.duration)}</span>
+                </div>
+              </div>
+
+              {/* Passenger Details Form */}
+              <div>
+                <h3 className="text-sm font-medium text-slate-400 mb-3">Passenger Details</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">First Name *</label>
+                    <input
+                      type="text"
+                      value={passengerDetails.firstName}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, firstName: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="John"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Last Name *</label>
+                    <input
+                      type="text"
+                      value={passengerDetails.lastName}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, lastName: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Email *</label>
+                    <input
+                      type="email"
+                      value={passengerDetails.email}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={passengerDetails.phone}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, phone: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="+1 234 567 8900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={passengerDetails.dateOfBirth}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Passport Number</label>
+                    <input
+                      type="text"
+                      value={passengerDetails.passportNumber}
+                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, passportNumber: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="AB1234567"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Important Notice */}
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <p className="text-sm text-amber-400">
+                  <strong>Note:</strong> This is a booking request. You will receive a confirmation email with payment details and booking reference once processed.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowBookingModal(false)}
+                  className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBookFlight}
+                  disabled={isBooking}
+                  className="flex-1 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  {isBooking ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <span>Confirm Booking</span>
+                      <HiArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );

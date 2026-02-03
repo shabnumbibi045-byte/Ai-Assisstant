@@ -293,8 +293,10 @@ async def process_voice_command(request: VoiceCommandRequest):
     Process a voice command.
     
     Can accept either audio URL or text for processing.
-    Returns intent, parameters, and response.
+    Returns intent, parameters, and response with ACTUAL results.
     """
+    from app.tools.tool_registry import ToolRegistry
+    
     # Get transcription
     if request.audio_url:
         # STUBBED: Would download and transcribe audio
@@ -310,8 +312,72 @@ async def process_voice_command(request: VoiceCommandRequest):
     # Extract parameters
     params = await VoiceService.extract_parameters(transcription, intent["intent"])
     
-    # Generate response
-    response_text = await VoiceService.generate_response(intent)
+    # Map intent to tool and execute for real results
+    action_taken = None
+    action_results = None
+    
+    try:
+        ToolRegistry.initialize()
+        
+        # Map voice intents to actual tools
+        intent_tool_map = {
+            "check_balance": "get_multi_currency_balance",
+            "list_transactions": "get_recent_transactions",
+            "portfolio_summary": "get_portfolio_summary",
+            "stock_quote": "get_stock_quote",
+            "search_flights": "search_flights",
+            "search_hotels": "search_hotels",
+            "legal_search": "search_legal_canada" if params.get("country") == "CA" else "search_legal_us"
+        }
+        
+        tool_name = intent_tool_map.get(intent["intent"])
+        
+        if tool_name:
+            logger.info(f"Executing voice command tool: {tool_name}")
+            
+            # Build tool parameters based on intent
+            tool_params = {}
+            
+            if tool_name == "search_flights":
+                tool_params = {
+                    "origin": params.get("origin", "YVR"),
+                    "destination": params.get("destination", "NBO"),
+                    "departure_date": params.get("date", datetime.now().strftime("%Y-%m-%d")),
+                    "passengers": 1
+                }
+            elif tool_name == "search_hotels":
+                tool_params = {
+                    "city": params.get("destination", "New York"),
+                    "check_in": params.get("date", datetime.now().strftime("%Y-%m-%d")),
+                    "nights": 3
+                }
+            elif tool_name in ["search_legal_canada", "search_legal_us"]:
+                tool_params = {"query": transcription, "limit": 5}
+            
+            # Execute the tool
+            result = await ToolRegistry.execute_tool(
+                tool_name=tool_name,
+                user_id=request.user_id,
+                parameters=tool_params,
+                permissions={"banking_read": True, "stocks_read": True, "travel_read": True, "research_read": True}
+            )
+            
+            if result.success:
+                action_results = result.data
+                action_taken = f"Executed {tool_name}"
+                logger.info(f"Voice command executed successfully: {tool_name}")
+            else:
+                logger.warning(f"Voice command tool failed: {result.error}")
+                
+    except Exception as e:
+        logger.error(f"Voice command execution error: {e}")
+    
+    # Generate response with actual results
+    response_text = await VoiceService.generate_response(intent, action_results)
+    
+    # If we have actual results, enhance the response
+    if action_results:
+        response_text = enhance_response_with_results(intent, action_results, response_text)
     
     # Generate TTS response (optional)
     tts_response = await VoiceService.text_to_speech(response_text)
@@ -324,8 +390,38 @@ async def process_voice_command(request: VoiceCommandRequest):
         parameters=params,
         response_text=response_text,
         audio_response_url=tts_response.audio_url,
-        action_taken=f"Executed {intent['intent']} in {intent['category']} module"
+        action_taken=action_taken or f"Processed {intent['intent']} in {intent['category']} module"
     )
+
+
+def enhance_response_with_results(intent: Dict, results: Dict, base_response: str) -> str:
+    """Enhance the voice response with actual data results."""
+    
+    intent_name = intent.get("intent", "")
+    
+    if intent_name == "search_flights" and results:
+        total = results.get("total_results", 0)
+        if results.get("best_deal"):
+            best = results["best_deal"]
+            return f"I found {total} flights. The best deal is {best.get('airline', 'Unknown')} for ${best.get('price', 0):.2f}, departing at {best.get('departure', 'N/A')[:10] if best.get('departure') else 'N/A'}."
+        return f"I found {total} flight options for your route. Check the Travel page for details."
+    
+    if intent_name == "check_balance" and results:
+        if isinstance(results, dict) and results.get("balances"):
+            total = sum(b.get("balance_usd", 0) for b in results.get("balances", []))
+            return f"Your total balance across all accounts is approximately ${total:,.2f} USD."
+        return base_response
+    
+    if intent_name == "portfolio_summary" and results:
+        value = results.get("total_value", 0)
+        change = results.get("daily_change", 0)
+        return f"Your portfolio is worth ${value:,.2f}, {'up' if change >= 0 else 'down'} ${abs(change):,.2f} today."
+    
+    if intent_name == "legal_search" and results:
+        total = results.get("total_results", 0)
+        return f"I found {total} relevant legal documents. The results include cases from various courts. Check the Research page for full details."
+    
+    return base_response
 
 
 @router.post("/tts", response_model=TextToSpeechResponse)

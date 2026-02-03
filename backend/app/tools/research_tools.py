@@ -265,57 +265,104 @@ class SearchLegalCanadaTool(BaseTool):
                 error="Search query is required"
             )
         
-        # STUBBED: Mock Canadian legal search results
-        courts = ["Supreme Court of Canada", "Federal Court of Appeal", "Ontario Court of Appeal", 
-                  "BC Supreme Court", "Alberta Court of Queen's Bench"]
-        
-        results = []
-        
-        # Case law results
-        for i in range(5):
-            year = random.randint(2015, 2024)
-            results.append({
-                "type": "case",
-                "title": f"R. v. {random.choice(['Smith', 'Johnson', 'Williams', 'Brown', 'Jones'])}",
-                "citation": f"{year} SCC {random.randint(1, 50)}" if jurisdiction == "federal" else f"{year} ONCA {random.randint(100, 999)}",
-                "court": random.choice(courts),
-                "date": f"{year}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-                "jurisdiction": jurisdiction.upper(),
-                "summary": f"Case involving {query}. The court ruled on matters related to {random.choice(['contract law', 'tort liability', 'criminal procedure', 'constitutional rights'])}.",
-                "relevance_score": round(random.uniform(0.7, 0.99), 2),
-                "url": f"https://canlii.ca/t/{random.randint(10000, 99999)}"
-            })
-        
-        # Statute results
-        for i in range(3):
-            results.append({
-                "type": "statute",
-                "title": f"{random.choice(['Income Tax', 'Criminal Code', 'Employment Standards', 'Consumer Protection'])} Act",
-                "section": f"s. {random.randint(1, 200)}",
-                "jurisdiction": jurisdiction.upper(),
-                "summary": f"Statutory provision related to {query}.",
-                "relevance_score": round(random.uniform(0.6, 0.95), 2),
-                "url": f"https://canlii.ca/t/{random.randint(10000, 99999)}"
-            })
-        
-        # Sort by relevance
-        results.sort(key=lambda x: x["relevance_score"], reverse=True)
-        
-        logger.info(f"Canadian legal search completed for {user_id}: {query}")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_id": f"CA-LEG-{random.randint(100000, 999999)}",
-                "query": query,
-                "jurisdiction": jurisdiction,
-                "results": results,
-                "total_results": len(results),
-                "sources": ["CanLII"],
-                "searched_at": datetime.now().isoformat()
-            },
-            message=f"Found {len(results)} Canadian legal results for '{query}'"
-        )
+        try:
+            # Use real CanLII service
+            from app.services.canlii_service import CanLIIService
+            
+            canlii_service = CanLIIService()
+            
+            # Map jurisdiction codes
+            jurisdiction_map = {
+                "federal": None,
+                "ontario": "on",
+                "bc": "bc",
+                "alberta": "ab",
+                "quebec": "qc",
+                "manitoba": "mb",
+                "saskatchewan": "sk",
+                "nova_scotia": "ns",
+                "new_brunswick": "nb",
+                "newfoundland": "nl",
+            }
+            
+            prov_code = jurisdiction_map.get(jurisdiction.lower())
+            
+            # Search cases
+            case_result = await canlii_service.search_cases(
+                query=query,
+                jurisdiction=prov_code,
+                limit=10
+            )
+            
+            if "error" in case_result and not case_result.get("demo_mode"):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"CanLII search failed: {case_result.get('error')}",
+                    error=case_result.get('error')
+                )
+            
+            # Format results
+            results = []
+            cases = case_result.get("cases", [])
+            
+            for case in cases:
+                results.append({
+                    "type": "case",
+                    "title": case.get("title", "Unknown"),
+                    "citation": case.get("citation", ""),
+                    "court": case.get("court", "Unknown"),
+                    "date": case.get("date", ""),
+                    "jurisdiction": case.get("jurisdiction", jurisdiction.upper()),
+                    "summary": case.get("summary", ""),
+                    "url": case.get("url", ""),
+                    "database_id": case.get("databaseId", ""),
+                    "case_id": case.get("caseId", {}).get("en", "")
+                })
+            
+            # Also search legislation if requested
+            if not doc_type or doc_type == "statute":
+                legislation_result = await canlii_service.search_legislation(
+                    query=query,
+                    jurisdiction=prov_code,
+                    limit=5
+                )
+                
+                if legislation_result and not legislation_result.get("error"):
+                    for statute in legislation_result.get("legislation", []):
+                        results.append({
+                            "type": "statute",
+                            "title": statute.get("title", "Unknown"),
+                            "jurisdiction": statute.get("jurisdiction", jurisdiction.upper()),
+                            "url": statute.get("url", "")
+                        })
+            
+            logger.info(f"Canadian legal search completed for {user_id}: {query} - Found {len(results)} results")
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "search_id": f"CA-LEG-{random.randint(100000, 999999)}",
+                    "query": query,
+                    "jurisdiction": jurisdiction,
+                    "results": results,
+                    "total_results": len(results),
+                    "sources": ["CanLII"],
+                    "searched_at": datetime.now().isoformat(),
+                    "demo_mode": case_result.get("demo_mode", False),
+                    "note": case_result.get("note", "")
+                },
+                message=f"Found {len(results)} Canadian legal results for '{query}'"
+            )
+            
+        except Exception as e:
+            logger.error(f"Canadian legal search error: {str(e)}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Canadian legal search failed: {str(e)}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {

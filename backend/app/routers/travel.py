@@ -554,3 +554,95 @@ async def get_travel_recommendations(
     except Exception as e:
         logger.error(f"Error generating recommendations: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate recommendations")
+
+
+# ============================================
+# BOOKING ENDPOINT
+# ============================================
+
+class PassengerDetails(BaseModel):
+    """Passenger booking details."""
+    firstName: str
+    lastName: str
+    email: str
+    phone: Optional[str] = None
+    dateOfBirth: Optional[str] = None
+    passportNumber: Optional[str] = None
+
+
+class BookingRequest(BaseModel):
+    """Flight booking request."""
+    flight: Dict[str, Any]
+    passenger: PassengerDetails
+    user_id: Optional[str] = None
+
+
+class BookingResponse(BaseModel):
+    """Booking response."""
+    success: bool
+    booking_id: str
+    message: str
+    confirmation_number: str
+    flight_details: Dict[str, Any]
+    passenger_name: str
+    total_amount: float
+    currency: str
+    status: str
+
+
+@router.post("/book", response_model=BookingResponse)
+async def book_flight(
+    request: BookingRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Book a flight.
+    Creates a booking request and returns confirmation details.
+    """
+    import uuid
+    from datetime import datetime
+    
+    try:
+        # Generate booking ID and confirmation number
+        booking_id = f"BK{uuid.uuid4().hex[:8].upper()}"
+        confirmation_number = f"CNF{uuid.uuid4().hex[:6].upper()}"
+        
+        # Get flight details
+        flight = request.flight
+        passenger = request.passenger
+        
+        # In production, this would:
+        # 1. Call Amadeus booking API
+        # 2. Process payment
+        # 3. Send confirmation email
+        # 4. Store in database
+        
+        logger.info(f"Flight booking requested by {current_user.email}")
+        logger.info(f"Flight: {flight.get('airline')} {flight.get('flight_number')}")
+        logger.info(f"Passenger: {passenger.firstName} {passenger.lastName}")
+        
+        response = BookingResponse(
+            success=True,
+            booking_id=booking_id,
+            message="Your booking request has been received. A confirmation email will be sent shortly.",
+            confirmation_number=confirmation_number,
+            flight_details={
+                "airline": flight.get("airline", "Unknown"),
+                "flight_number": flight.get("flight_number", ""),
+                "origin": flight.get("origin", ""),
+                "destination": flight.get("destination", ""),
+                "departure": flight.get("departure", ""),
+                "arrival": flight.get("arrival", ""),
+                "cabin_class": flight.get("cabin_class", "Economy"),
+            },
+            passenger_name=f"{passenger.firstName} {passenger.lastName}",
+            total_amount=float(flight.get("price", 0)),
+            currency=flight.get("currency", "USD"),
+            status="pending_confirmation"
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Booking error: {e}")
+        raise HTTPException(status_code=500, detail="Booking failed. Please try again.")

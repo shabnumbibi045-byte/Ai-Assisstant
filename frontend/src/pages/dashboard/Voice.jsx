@@ -10,6 +10,8 @@ import {
   HiClock,
   HiSparkles,
   HiChat,
+  HiPaperAirplane,
+  HiRefresh,
 } from 'react-icons/hi';
 import { voiceAPI } from '../../services/api';
 
@@ -281,11 +283,11 @@ const Voice = () => {
       // Already stopped
     }
 
-    // Process the transcript
+    // Don't auto-process - let user review and click send button
     if (transcript.trim()) {
-      await processVoiceCommand(transcript);
+      toast.success('Ready to send! Click the green button to submit your command.');
     }
-  }, [transcript, processVoiceCommand]);
+  }, [transcript]);
 
   // Quick command handler
   const handleQuickCommand = useCallback(async (commandText) => {
@@ -348,14 +350,17 @@ const Voice = () => {
             </div>
 
             {/* Microphone Button */}
-            <div className="flex justify-center mb-6">
+            <div className="flex justify-center items-center gap-4 mb-6">
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={isListening ? handleStopListening : handleStartListening}
+                disabled={isProcessing}
                 className={`w-24 h-24 rounded-full flex items-center justify-center transition-all ${
                   isListening
                     ? 'bg-red-500 shadow-lg shadow-red-500/30'
+                    : isProcessing
+                    ? 'bg-slate-600 cursor-not-allowed'
                     : 'bg-gradient-to-br from-primary-500 to-secondary-500 shadow-lg shadow-primary-500/30'
                 }`}
               >
@@ -365,11 +370,39 @@ const Voice = () => {
                   <HiMicrophone className="w-10 h-10 text-white" />
                 )}
               </motion.button>
+              
+              {/* Send button - visible when there's a transcript */}
+              {transcript && !isListening && !isProcessing && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => processVoiceCommand(transcript)}
+                  className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center"
+                >
+                  <HiPaperAirplane className="w-7 h-7 text-white transform rotate-90" />
+                </motion.button>
+              )}
             </div>
 
-            <p className="text-center text-slate-400 mb-6">
-              {isListening ? 'Listening... Click to stop' : 'Click to start speaking'}
-            </p>
+            {/* Status Text with better feedback */}
+            <div className="text-center mb-6">
+              {isProcessing ? (
+                <div className="flex items-center justify-center gap-2 text-primary-400">
+                  <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  <span className="ml-2">Processing your request...</span>
+                </div>
+              ) : isListening ? (
+                <p className="text-red-400 animate-pulse">🎤 Listening... Click the red button to stop and send</p>
+              ) : transcript ? (
+                <p className="text-emerald-400">Click the green send button to submit your command</p>
+              ) : (
+                <p className="text-slate-400">Click the microphone to start speaking</p>
+              )}
+            </div>
 
             {/* Transcript */}
             {transcript && (
@@ -378,7 +411,16 @@ const Voice = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="p-4 rounded-xl bg-slate-800/50 mb-4"
               >
-                <p className="text-xs text-slate-500 mb-1">You said:</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-slate-500">You said:</p>
+                  <button
+                    onClick={() => setTranscript('')}
+                    className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                  >
+                    <HiRefresh className="w-3 h-3" />
+                    Clear
+                  </button>
+                </div>
                 <p className="text-white">{transcript}</p>
               </motion.div>
             )}
