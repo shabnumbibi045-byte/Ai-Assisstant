@@ -56,6 +56,27 @@ async def get_current_user(
         raise credentials_exception
     
     token = credentials.credentials
+    
+    # Handle demo token for development/testing
+    if token == "demo-token":
+        # Create a mock demo user object
+        demo_user = User(
+            id=1,
+            user_id="demo-user-001",
+            email="demo@lestap.com",
+            full_name="Demo User",
+            is_active=True,
+            is_verified=True,
+            preferences={
+                "modules_enabled": ["chat", "memory", "banking", "stocks", "travel", "research"]
+            }
+        )
+        # Keep permissions as empty list - get_user_enabled_modules will use preferences fallback
+        demo_user.permissions = []
+        logger.info("Demo token authenticated - using demo user")
+        return demo_user
+        return demo_user
+    
     payload = verify_token(token, token_type="access")
     
     if not payload:

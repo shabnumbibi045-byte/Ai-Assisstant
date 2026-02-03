@@ -54,20 +54,29 @@ def get_user_permissions(user: User) -> Dict[str, bool]:
     permissions = {}
 
     # Get permissions from user_permissions table
-    if hasattr(user, 'permissions') and user.permissions:
+    if hasattr(user, 'permissions') and user.permissions and len(user.permissions) > 0:
         for perm in user.permissions:
             if perm.granted:
                 # Create permission keys like "travel_read", "banking_read", etc.
                 perm_key = f"{perm.module}_{perm.permission_type}"
                 permissions[perm_key] = True
 
-    # Fallback to preferences if no permissions found
+    # Fallback to preferences if no permissions found - grant read/write for all enabled modules
     if not permissions:
         preferences = user.preferences or {}
+        
+        # Check for module_permissions in preferences
         module_perms = preferences.get("module_permissions", {})
         for module, perms in module_perms.items():
             for perm_name, value in perms.items():
-                permissions[f"{module}.{perm_name}"] = value
+                permissions[f"{module}_{perm_name}"] = value
+        
+        # If still no permissions, auto-grant based on modules_enabled
+        if not permissions:
+            enabled_modules = preferences.get("modules_enabled", ["chat", "memory"])
+            for module in enabled_modules:
+                permissions[f"{module}_read"] = True
+                permissions[f"{module}_write"] = True
 
     return permissions
 
@@ -75,7 +84,7 @@ def get_user_permissions(user: User) -> Dict[str, bool]:
 def get_user_enabled_modules(user: User) -> List[str]:
     """Get list of enabled modules for user."""
     # Get enabled modules from user_permissions table
-    if hasattr(user, 'permissions') and user.permissions:
+    if hasattr(user, 'permissions') and user.permissions and len(user.permissions) > 0:
         modules = list(set(
             perm.module for perm in user.permissions if perm.granted
         ))
@@ -84,7 +93,7 @@ def get_user_enabled_modules(user: User) -> List[str]:
 
     # Fallback to preferences if no permissions found
     preferences = user.preferences or {}
-    return preferences.get("modules_enabled", ["chat", "memory"])
+    return preferences.get("modules_enabled", ["chat", "memory", "banking", "stocks", "travel", "research"])
 
 
 def check_module_access(user: User, tool_category: str) -> bool:
