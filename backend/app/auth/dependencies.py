@@ -60,6 +60,7 @@ async def get_current_user(
     # Handle demo token for development/testing
     if token == "demo-token":
         # Create a mock demo user object
+        from datetime import datetime
         demo_user = User(
             id=1,
             user_id="demo-user-001",
@@ -67,6 +68,8 @@ async def get_current_user(
             full_name="Demo User",
             is_active=True,
             is_verified=True,
+            created_at=datetime(2025, 1, 1),
+            last_active=datetime.utcnow(),
             preferences={
                 "modules_enabled": ["chat", "memory", "banking", "stocks", "travel", "research"]
             }
@@ -74,7 +77,6 @@ async def get_current_user(
         # Keep permissions as empty list - get_user_enabled_modules will use preferences fallback
         demo_user.permissions = []
         logger.info("Demo token authenticated - using demo user")
-        return demo_user
         return demo_user
     
     payload = verify_token(token, token_type="access")

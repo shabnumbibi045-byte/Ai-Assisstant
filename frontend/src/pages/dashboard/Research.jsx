@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
+import api from '../../services/api';
 import {
   HiSearch,
   HiDocumentText,
@@ -19,9 +20,6 @@ import {
   HiXCircle,
 } from 'react-icons/hi';
 import { FaGavel, FaFileContract, FaBalanceScale } from 'react-icons/fa';
-
-// API base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
 
 const Research = () => {
   const { token, user } = useAuthStore();
@@ -77,13 +75,7 @@ const Research = () => {
     setSearchResults([]);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tools/invoke`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await api.post('/tools/invoke', {
           user_id: user?.user_id || user?.id || 'unknown',
           tool_name: 'search_legal_us',
           parameters: {
@@ -94,10 +86,9 @@ const Research = () => {
             date_filed_before: dateTo || undefined,
             limit: 10
           }
-        })
       });
 
-      const data = await response.json();
+      const data = response.data;
 
       if (data.success && data.data) {
         const results = data.data.results || [];

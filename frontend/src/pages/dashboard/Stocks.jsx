@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
+import api from '../../services/api';
 import {
   HiTrendingUp,
   HiTrendingDown,
@@ -38,7 +39,7 @@ ChartJS.register(
 );
 
 const Stocks = () => {
-  const { token, isAuthenticated } = useAuthStore();
+  const { token } = useAuthStore();
   const [activeTab, setActiveTab] = useState('portfolio');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -67,9 +68,6 @@ const Stocks = () => {
     { symbol: 'NVDA', condition: 'above', targetPrice: 700.00, currentPrice: 0, active: true },
   ]);
 
-  // API base URL from environment or default
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
-
   // Fetch real-time stock quote from backend
   const fetchStockQuote = async (symbol, showErrors = false) => {
     try {
@@ -78,29 +76,13 @@ const Stocks = () => {
         return null;
       }
 
-      const response = await fetch(`${API_BASE_URL}/stocks/quote/${symbol}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        if (showErrors) {
-          if (response.status === 401) {
-            toast.error('Session expired. Please login again.');
-          } else {
-            const errorData = await response.json().catch(() => ({}));
-            toast.error(`Failed to fetch ${symbol}: ${errorData.detail || response.statusText}`);
-          }
-        }
-        return null;
-      }
-
-      const data = await response.json();
-      return data;
+      const response = await api.get(`/stocks/quote/${symbol}`);
+      return response.data;
     } catch (error) {
-      if (showErrors) toast.error(`Error fetching ${symbol}: ${error.message}`);
+      if (showErrors) {
+        const detail = error.response?.data?.detail || error.message;
+        toast.error(`Failed to fetch ${symbol}: ${detail}`);
+      }
       return null;
     }
   };

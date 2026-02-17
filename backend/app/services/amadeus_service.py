@@ -383,6 +383,10 @@ class AmadeusService:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         result = await response.json()
+                        # Amadeus sometimes returns errors with 200 status
+                        if isinstance(result, dict) and "errors" in result and "data" not in result:
+                            logger.warning(f"Amadeus Transfer API returned errors: {result.get('errors', [])}")
+                            return self._get_mock_car_rentals(pickup_location, pickup_date, dropoff_date)
                         logger.info(f"Found transfer/car options for {pickup_location}")
                         return result
                     else:

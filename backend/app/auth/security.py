@@ -12,12 +12,20 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Password hashing - Configure bcrypt with truncate_error disabled
+# Password hashing
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
-    bcrypt__truncate_error=False  # Allow automatic truncation to 72 bytes
 )
+
+
+def _truncate_password(password: str) -> str:
+    """Truncate password to 72 bytes for bcrypt compatibility."""
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password = password_bytes[:72].decode('utf-8', errors='ignore')
+    return password
+
 
 # JWT settings
 ALGORITHM = "HS256"
@@ -36,7 +44,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True if password matches
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(_truncate_password(plain_password), hashed_password)
 
 
 def get_password_hash(password: str) -> str:
@@ -48,26 +56,8 @@ def get_password_hash(password: str) -> str:
 
     Returns:
         Hashed password
-
-    Raises:
-        ValueError: If password is too long (>72 bytes for bcrypt)
     """
-    # Bcrypt has a 72-byte limit - truncate if necessary
-    # This is the recommended approach per passlib documentation
-    password_bytes = password.encode('utf-8')
-    if len(password_bytes) > 72:
-        # Truncate to 72 bytes for bcrypt compatibility
-        password = password_bytes[:72].decode('utf-8', errors='ignore')
-
-    try:
-        return pwd_context.hash(password)
-    except ValueError as e:
-        # Handle any remaining bcrypt errors
-        if "72 bytes" in str(e):
-            # Force truncate and retry
-            password = password[:72]
-            return pwd_context.hash(password)
-        raise
+    return pwd_context.hash(_truncate_password(password))
 
 
 def create_access_token(

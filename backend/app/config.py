@@ -37,19 +37,19 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "your-encryption-key-32-bytes-long!"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     
-    # Database (MySQL)
-    DATABASE_URL: str = "mysql+aiomysql://root:password@localhost:3306/salim_ai"
+    # Database (SQLite for local dev, MySQL for production)
+    DATABASE_URL: str = "sqlite+aiosqlite:///./salim_ai.db"
     DATABASE_ECHO: bool = False
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
-    REDIS_ENABLED: bool = True
+    REDIS_ENABLED: bool = False  # Set True if Redis is available
     
     # Qdrant (Vector DB)
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION: str = "user_memories"
     QDRANT_VECTOR_SIZE: int = 1536  # OpenAI text-embedding-3-small
-    QDRANT_ENABLED: bool = True
+    QDRANT_ENABLED: bool = False  # Set True if Qdrant is available
     
     # LLM Providers
     OPENAI_API_KEY: Optional[str] = None

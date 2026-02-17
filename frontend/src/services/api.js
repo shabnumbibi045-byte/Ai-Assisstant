@@ -15,14 +15,10 @@ const api = axios.create({
 // Request interceptor - add auth token
 api.interceptors.request.use(
   (config) => {
-    const { token, isAuthenticated } = useAuthStore.getState();
+    const { token } = useAuthStore.getState();
     
-    // Skip auth header for demo mode
-    if (token === 'demo-token') {
-      return config;
-    }
-    
-    if (token && isAuthenticated) {
+    // Always send auth header (including demo-token for backend demo user)
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -39,9 +35,9 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const { token, logout, refreshAccessToken } = useAuthStore.getState();
 
-    // Skip error handling for demo mode
-    if (token === 'demo-token') {
-      // Return mock data for demo mode
+    // For demo mode: only fall back to mock data on network errors (no response from server)
+    if (token === 'demo-token' && !error.response) {
+      // Backend is unreachable - return mock data
       return handleDemoModeRequest(originalRequest);
     }
 
@@ -251,6 +247,12 @@ export const documentsAPI = {
   query: (query, topK = 5) => api.post('/rag/query', { query, top_k: topK }),
   list: () => api.get('/rag/documents'),
   delete: (documentId) => api.delete(`/rag/documents/${documentId}`),
+  summarize: (documentId = null, summarizeAll = false) =>
+    api.post('/rag/summarize', { document_id: documentId, summarize_all: summarizeAll }),
+  downloadSummary: (documentId) =>
+    api.get(`/rag/download-summary/${documentId}`, { responseType: 'blob' }),
+  downloadAllSummaries: () =>
+    api.get('/rag/download-all-summaries', { responseType: 'blob' }),
 };
 
 // Memory API

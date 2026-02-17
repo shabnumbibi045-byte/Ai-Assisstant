@@ -14,11 +14,13 @@ import {
   HiRefresh,
 } from 'react-icons/hi';
 import { voiceAPI } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 
 // Browser Speech Recognition
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const Voice = () => {
+  const { user } = useAuthStore();
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
@@ -187,7 +189,7 @@ const Voice = () => {
     try {
       // Call backend voice command API
       const response = await voiceAPI.processCommand({
-        user_id: 'current_user',
+        user_id: user?.user_id || 'demo-user-001',
         text: text
       });
 
@@ -447,12 +449,17 @@ const Voice = () => {
           {/* Quick Commands */}
           <div className="card">
             <h3 className="text-lg font-semibold text-white mb-4">Quick Commands</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
               {[
                 { text: 'Check my balances', icon: '💰' },
                 { text: 'Send an email', icon: '✉️' },
                 { text: 'Stock portfolio', icon: '📈' },
-                { text: 'Search flights', icon: '✈️' },
+                { text: 'Search flights from Toronto to London', icon: '✈️' },
+                { text: 'Find hotels in Dubai for next week', icon: '🏨' },
+                { text: 'Rent a car in New York for 5 days', icon: '🚗' },
+                { text: 'Set alert for flights from Vancouver to Nairobi', icon: '🔔' },
+                { text: 'Summarize my documents', icon: '📝' },
+                { text: 'List my uploaded documents', icon: '📂' },
                 { text: 'Legal research', icon: '⚖️' },
                 { text: 'Query documents', icon: '📄' },
               ].map((cmd, index) => (

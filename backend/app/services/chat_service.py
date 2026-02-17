@@ -165,8 +165,21 @@ class ChatService:
 
         except Exception as e:
             logger.error(f"Chat processing error: {e}", exc_info=True)
+            error_str = str(e).lower()
+            if "401" in str(e) or "invalid_api_key" in error_str or "authentication" in error_str or "incorrect api key" in error_str:
+                error_msg = (
+                    "⚠️ **OpenAI API Key Error**: The configured API key is invalid or expired. "
+                    "Please update your `OPENAI_API_KEY` in the backend `.env` file with a valid key from "
+                    "[platform.openai.com/api-keys](https://platform.openai.com/api-keys)."
+                )
+            elif "rate_limit" in error_str or "429" in str(e):
+                error_msg = "⚠️ Rate limit reached. Please wait a moment and try again."
+            elif "insufficient_quota" in error_str or "billing" in error_str:
+                error_msg = "⚠️ **OpenAI Quota Exceeded**: Your API account has run out of credits. Please check your billing at [platform.openai.com/account/billing](https://platform.openai.com/account/billing)."
+            else:
+                error_msg = f"I apologize, but I encountered an error processing your request. Please try again or rephrase your question."
             return ChatResponse(
-                response=f"I apologize, but I encountered an error processing your request. Please try again or rephrase your question.",
+                response=error_msg,
                 tokens_used=0,
                 tool_calls=[],
                 sources=[],

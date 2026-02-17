@@ -418,9 +418,9 @@ class RAGUploadRequest(BaseModel):
 
 
 class RAGQueryRequest(BaseModel):
-    user_id: str
     query: str
     top_k: int = 5
+    user_id: Optional[str] = None
 
 
 class RAGQueryResponse(BaseModel):

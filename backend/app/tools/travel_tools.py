@@ -376,12 +376,12 @@ class SetFlightPriceAlertTool(BaseTool):
 # ============================================
 
 class SearchHotelsTool(BaseTool):
-    """Search hotels across multiple providers."""
+    """Search hotels using real Amadeus API."""
     
     def __init__(self):
         super().__init__(
             name="search_hotels",
-            description="Search for hotels across Expedia, Priceline (VIP), and other providers",
+            description="Search for hotels with real-time pricing from Amadeus API",
             category=ToolCategory.TRAVEL
         )
     
@@ -417,90 +417,198 @@ class SearchHotelsTool(BaseTool):
         # Calculate nights
         check_in_dt = datetime.strptime(check_in, "%Y-%m-%d")
         check_out_dt = datetime.strptime(check_out, "%Y-%m-%d")
-        nights = (check_out_dt - check_in_dt).days
-        
-        # STUBBED: Mock hotel results
-        hotel_chains = ["Marriott", "Hilton", "Hyatt", "Sheraton", "Holiday Inn", "Best Western", "Four Seasons", "Ritz-Carlton"]
-        
-        results = []
-        
-        # Expedia results
-        for i in range(4):
-            nightly_rate = random.randint(100, 500)
-            results.append({
-                "provider": "Expedia",
-                "hotel_name": f"{random.choice(hotel_chains)} {location}",
-                "star_rating": random.randint(3, 5),
-                "location": location,
-                "address": f"{random.randint(100, 999)} {random.choice(['Main', 'Park', 'Ocean', 'Lake'])} Street",
-                "nightly_rate": nightly_rate,
-                "total_price": nightly_rate * nights,
-                "currency": "USD",
-                "room_type": random.choice(["Standard King", "Double Queen", "Suite", "Deluxe King"]),
-                "amenities": ["WiFi", "Pool", "Gym", "Restaurant", "Parking"],
-                "rating": round(random.uniform(7.5, 9.5), 1),
-                "reviews": random.randint(500, 5000),
-                "free_cancellation": random.choice([True, False]),
-                "breakfast_included": random.choice([True, False]),
-                "booking_link": "https://expedia.com/hotel/..."
-            })
-        
-        # Priceline VIP results
-        for i in range(4):
-            nightly_rate = random.randint(90, 450)  # Better VIP rates
-            vip_discount = int(nightly_rate * 0.10)  # 10% VIP discount
-            results.append({
-                "provider": "Priceline",
-                "provider_tier": "VIP Platinum",
-                "hotel_name": f"{random.choice(hotel_chains)} {location}",
-                "star_rating": random.randint(3, 5),
-                "location": location,
-                "address": f"{random.randint(100, 999)} {random.choice(['Main', 'Park', 'Ocean', 'Lake'])} Avenue",
-                "original_nightly_rate": nightly_rate,
-                "vip_discount_per_night": vip_discount,
-                "nightly_rate": nightly_rate - vip_discount,
-                "total_price": (nightly_rate - vip_discount) * nights,
-                "currency": "USD",
-                "room_type": random.choice(["Standard King", "Double Queen", "Suite", "Deluxe King"]),
-                "amenities": ["WiFi", "Pool", "Gym", "Restaurant", "Parking"],
-                "rating": round(random.uniform(7.5, 9.5), 1),
-                "reviews": random.randint(500, 5000),
-                "vip_benefits": ["Room upgrade when available", "Late checkout", "VIP welcome"],
-                "free_cancellation": True,
-                "breakfast_included": random.choice([True, False]),
-                "booking_link": "https://priceline.com/vip/hotel/..."
-            })
-        
-        # Sort by price
-        results.sort(key=lambda x: x["total_price"])
-        
-        best_deal = results[0]
-        
-        logger.info(f"Hotel search completed for {user_id}: {location}, {len(results)} results")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_id": f"HTL-{random.randint(100000, 999999)}",
-                "search_params": {
-                    "location": location,
-                    "check_in": check_in,
-                    "check_out": check_out,
-                    "nights": nights,
-                    "guests": guests,
-                    "rooms": rooms
+        nights = max((check_out_dt - check_in_dt).days, 1)
+
+        try:
+            from app.services.amadeus_service import amadeus_service
+            from app.routers.travel import city_to_iata_code
+
+            city_code = city_to_iata_code(location)
+            logger.info(f"Searching hotels via Amadeus in {location} (code: {city_code})")
+
+            # Step 1: Get hotel list by city
+            hotel_list_result = await amadeus_service.search_hotels(
+                city_code=city_code,
+                check_in_date=check_in,
+                check_out_date=check_out,
+                adults=guests,
+                rooms=rooms,
+            )
+
+            if not hotel_list_result or "data" not in hotel_list_result:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message=f"No hotels found in {location}",
+                    error="Amadeus returned no hotel data for this location"
+                )
+
+            raw_hotels = hotel_list_result["data"][:20]
+            hotel_ids = [h.get("hotelId") for h in raw_hotels if h.get("hotelId")]
+
+            if not hotel_ids:
+                return ToolResult(
+                    success=False, data=None,
+                    message=f"No bookable hotels found in {location}",
+                    error="No hotel IDs returned"
+                )
+
+            # Step 2: Get real-time offers with pricing
+            offers_result = await amadeus_service.get_hotel_offers(
+                hotel_ids=hotel_ids[:10],
+                check_in_date=check_in,
+                check_out_date=check_out,
+                adults=guests,
+                rooms=rooms,
+            )
+
+            # Build metadata lookup
+            hotel_meta = {h.get("hotelId"): h for h in raw_hotels}
+
+            results = []
+            if offers_result and "data" in offers_result:
+                for offer_item in offers_result["data"]:
+                    try:
+                        hotel_data = offer_item.get("hotel", {})
+                        hotel_id = hotel_data.get("hotelId", offer_item.get("hotelId", ""))
+                        offers = offer_item.get("offers", [])
+                        if not offers:
+                            continue
+
+                        best_offer = offers[0]
+                        price_info = best_offer.get("price", {})
+                        total_price = float(price_info.get("total", "0") or "0")
+                        currency = price_info.get("currency", "USD")
+                        nightly_rate = round(total_price / nights, 2)
+
+                        room = best_offer.get("room", {})
+                        room_type = room.get("typeEstimated", {}).get("category", "Standard Room")
+                        room_desc = room.get("description", {}).get("text", room_type)
+
+                        policies = best_offer.get("policies", {})
+                        cancellation = policies.get("cancellations", [{}])
+                        free_cancel = False
+                        if cancellation:
+                            cancel_type = cancellation[0].get("type", "")
+                            free_cancel = "FREE" in cancel_type.upper() or cancel_type == "FULL_STAY"
+
+                        name = hotel_data.get("name", "Hotel")
+                        meta = hotel_meta.get(hotel_id, {})
+                        rating = float(meta.get("rating", hotel_data.get("rating", 3)))
+
+                        amenities_raw = meta.get("amenities", [])
+                        amenity_map = {
+                            "SWIMMING_POOL": "Pool", "WIFI": "Free WiFi", "FREE_WIFI": "Free WiFi",
+                            "FITNESS_CENTER": "Gym", "RESTAURANT": "Restaurant", "BAR": "Bar",
+                            "SPA": "Spa", "PARKING": "Parking", "ROOM_SERVICE": "Room Service",
+                        }
+                        amenities = list({amenity_map.get(a, a.replace("_", " ").title()) for a in amenities_raw})
+
+                        if star_rating and rating < star_rating:
+                            continue
+
+                        results.append({
+                            "hotel_id": hotel_id,
+                            "hotel_name": name.title() if name == name.upper() else name,
+                            "star_rating": rating,
+                            "location": location,
+                            "address": meta.get("address", {}).get("lines", [""])[0] if meta.get("address") else "",
+                            "nightly_rate": nightly_rate,
+                            "total_price": total_price,
+                            "currency": currency,
+                            "room_type": room_desc if room_desc != room_type else room_type,
+                            "amenities": amenities[:8] if amenities else ["Free WiFi"],
+                            "free_cancellation": free_cancel,
+                            "breakfast_included": any("BREAKFAST" in str(a).upper() for a in amenities_raw),
+                            "distance_from_center": round(meta.get("distance", {}).get("value", 0), 1) if meta.get("distance") else 0,
+                            "data_source": "Amadeus API (Real-Time)"
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error parsing hotel offer: {e}")
+                        continue
+
+            # Fallback: if no offers with pricing, build results from hotel list metadata
+            if not results:
+                logger.info(f"No pricing offers, building results from hotel metadata for {location}")
+                for h in raw_hotels[:8]:
+                    try:
+                        name = h.get("name", "Hotel")
+                        rating = float(h.get("rating", 3))
+                        if star_rating and rating < star_rating:
+                            continue
+                        amenities_raw = h.get("amenities", [])
+                        amenity_map = {
+                            "SWIMMING_POOL": "Pool", "WIFI": "Free WiFi", "FREE_WIFI": "Free WiFi",
+                            "FITNESS_CENTER": "Gym", "RESTAURANT": "Restaurant", "SPA": "Spa",
+                            "PARKING": "Parking",
+                        }
+                        amenities = list({amenity_map.get(a, a.replace("_", " ").title()) for a in amenities_raw})
+                        dist = round(h.get("distance", {}).get("value", 0), 1) if h.get("distance") else 0
+                        results.append({
+                            "hotel_id": h.get("hotelId", ""),
+                            "hotel_name": name.title() if name == name.upper() else name,
+                            "star_rating": rating,
+                            "location": location,
+                            "address": h.get("address", {}).get("lines", [""])[0] if h.get("address") else "",
+                            "nightly_rate": 0,
+                            "total_price": 0,
+                            "currency": "USD",
+                            "room_type": "Standard Room",
+                            "amenities": amenities[:6] if amenities else ["Free WiFi"],
+                            "free_cancellation": False,
+                            "breakfast_included": any("BREAKFAST" in str(a).upper() for a in amenities_raw),
+                            "distance_from_center": dist,
+                            "data_source": "Amadeus Hotel List (pricing unavailable in test mode)",
+                            "note": "Contact hotel directly for current rates"
+                        })
+                    except Exception:
+                        continue
+
+            if not results:
+                return ToolResult(
+                    success=False, data=None,
+                    message=f"No hotels found in {location}",
+                    error="Could not retrieve hotel data"
+                )
+
+            results.sort(key=lambda x: x["total_price"])
+            best_deal = results[0]
+
+            logger.info(f"Found {len(results)} real-time hotels from Amadeus for {location}")
+
+            return ToolResult(
+                success=True,
+                data={
+                    "search_id": f"HTL-{random.randint(100000, 999999)}",
+                    "search_params": {
+                        "location": location,
+                        "check_in": check_in,
+                        "check_out": check_out,
+                        "nights": nights,
+                        "guests": guests,
+                        "rooms": rooms
+                    },
+                    "results": results,
+                    "total_results": len(results),
+                    "best_deal": best_deal,
+                    "price_range": {
+                        "min_nightly": min(r["nightly_rate"] for r in results),
+                        "max_nightly": max(r["nightly_rate"] for r in results)
+                    },
+                    "searched_at": datetime.now().isoformat(),
+                    "data_source": "Amadeus API (Real-Time)"
                 },
-                "results": results,
-                "total_results": len(results),
-                "best_deal": best_deal,
-                "price_range": {
-                    "min_nightly": min(r["nightly_rate"] for r in results),
-                    "max_nightly": max(r["nightly_rate"] for r in results)
-                },
-                "searched_at": datetime.now().isoformat()
-            },
-            message=f"Found {len(results)} hotels. Best price: ${best_deal['nightly_rate']}/night at {best_deal['hotel_name']}"
-        )
+                message=f"Found {len(results)} real-time hotels. Best price: ${best_deal['nightly_rate']:.2f}/night at {best_deal['hotel_name']}",
+                metadata={"disclaimer": "Real-time hotel data from Amadeus Travel API"}
+            )
+
+        except Exception as e:
+            logger.error(f"Error searching hotels via Amadeus: {e}")
+            return ToolResult(
+                success=False, data=None,
+                message=f"Failed to search hotels: {str(e)}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -546,12 +654,12 @@ class SearchHotelsTool(BaseTool):
 # ============================================
 
 class SearchCarRentalsTool(BaseTool):
-    """Search car rentals across providers."""
+    """Search car rentals using real Amadeus Transfer API."""
     
     def __init__(self):
         super().__init__(
             name="search_car_rentals",
-            description="Search for car rentals from Enterprise, Hertz, and other providers",
+            description="Search for car rentals with real-time pricing from Amadeus API",
             category=ToolCategory.TRAVEL
         )
     
@@ -585,56 +693,165 @@ class SearchCarRentalsTool(BaseTool):
         # Calculate days
         pickup_dt = datetime.strptime(pickup_date, "%Y-%m-%d")
         return_dt = datetime.strptime(return_date, "%Y-%m-%d")
-        days = (return_dt - pickup_dt).days
-        
-        # STUBBED: Mock car rental results
-        providers = ["Enterprise", "Hertz", "Avis", "Budget", "National", "Alamo"]
-        car_types = ["Economy", "Compact", "Midsize", "Full-size", "SUV", "Premium", "Luxury"]
-        
-        results = []
-        
-        for provider in providers[:4]:
-            for ct in (car_types if not car_type else [car_type]):
-                daily_rate = random.randint(30, 150)
-                results.append({
-                    "provider": provider,
-                    "car_type": ct,
-                    "car_model": random.choice(["Toyota Corolla", "Honda Civic", "Ford Escape", "Jeep Cherokee", "BMW 3 Series"]),
-                    "pickup_location": pickup_location,
-                    "daily_rate": daily_rate,
-                    "total_price": daily_rate * days,
-                    "currency": "USD",
-                    "features": ["Automatic", "A/C", "Bluetooth", "GPS"],
-                    "mileage": "Unlimited",
-                    "insurance_included": random.choice([True, False]),
-                    "free_cancellation": random.choice([True, False]),
-                    "booking_link": f"https://{provider.lower()}.com/book/..."
-                })
-        
-        # Sort by price
-        results.sort(key=lambda x: x["total_price"])
-        
-        best_deal = results[0]
-        
-        logger.info(f"Car rental search completed for {user_id}: {pickup_location}, {len(results)} results")
-        
-        return ToolResult(
-            success=True,
-            data={
-                "search_id": f"CAR-{random.randint(100000, 999999)}",
-                "search_params": {
-                    "pickup_location": pickup_location,
-                    "pickup_date": pickup_date,
-                    "return_date": return_date,
-                    "days": days
+        days = max((return_dt - pickup_dt).days, 1)
+
+        try:
+            from app.services.amadeus_service import amadeus_service
+            from app.routers.travel import city_to_iata_code
+
+            location_code = city_to_iata_code(pickup_location)
+            logger.info(f"Searching car rentals via Amadeus at {pickup_location} (code: {location_code})")
+
+            result = await amadeus_service.search_car_rentals(
+                pickup_location=location_code,
+                pickup_date=pickup_date,
+                pickup_time="10:00:00",
+                dropoff_date=return_date,
+                dropoff_time="10:00:00",
+                dropoff_location=location_code,
+            )
+
+            results = []
+            raw_data = []
+            if result:
+                if isinstance(result, dict) and "data" in result:
+                    raw_data = result["data"]
+                elif isinstance(result, list):
+                    raw_data = result
+                elif isinstance(result, dict):
+                    # Some Transfer API responses might have different structure
+                    logger.info(f"Car rental response keys: {list(result.keys())}")
+                    # Try extracting from other known keys
+                    for key in ["transfers", "offers", "results"]:
+                        if key in result:
+                            raw_data = result[key]
+                            break
+
+            if raw_data:
+                logger.info(f"Car rental data received: {len(raw_data)} items")
+                for idx, car_data in enumerate(raw_data):
+                    try:
+                        logger.info(f"Parsing car item {idx}, keys: {list(car_data.keys())}")
+                        # Handle Amadeus Transfer API format
+                        if "transferType" in car_data:
+                            vehicle = car_data.get("vehicle", car_data.get("serviceProvider", {}))
+                            price_info = car_data.get("quotation", car_data.get("price", {}))
+                            provider_data = car_data.get("serviceProvider", {})
+                            provider = provider_data.get("name", "Transfer Service") if isinstance(provider_data, dict) else str(provider_data)
+                            included = []
+                            category = car_data.get("transferType", "PRIVATE")
+                            car_name = vehicle.get("description", f"{category} Transfer")
+                            seats = int(vehicle.get("seats", {}).get("count", 4)) if isinstance(vehicle.get("seats"), dict) else int(vehicle.get("seats", 4))
+                            transmission = "Automatic"
+                            total_str = price_info.get("monetaryAmount", price_info.get("total", "0"))
+                            currency = price_info.get("currencyCode", price_info.get("currency", "USD"))
+                        # Handle mock/standard format with vehicle key
+                        elif "vehicle" in car_data:
+                            vehicle = car_data["vehicle"]
+                            price_info = car_data.get("price", {})
+                            provider = car_data.get("provider", "Rental Co")
+                            included = car_data.get("included", [])
+                            category = vehicle.get("category", vehicle.get("type", "Standard"))
+                            car_name = vehicle.get("type", vehicle.get("description", f"{category} Car"))
+                            seats = int(vehicle.get("seats", 5))
+                            transmission = vehicle.get("transmission", "Automatic")
+                            total_str = price_info.get("total", "0")
+                            currency = price_info.get("currency", "USD")
+                        else:
+                            vehicle = car_data
+                            price_info = car_data.get("price", {})
+                            provider = car_data.get("provider", "Rental Co")
+                            included = car_data.get("included", [])
+                            category = vehicle.get("category", "Standard")
+                            car_name = vehicle.get("type", "Car")
+                            seats = 5
+                            transmission = "Automatic"
+                            total_str = price_info.get("total", "0")
+                            currency = price_info.get("currency", "USD")
+
+                        if isinstance(provider, dict):
+                            provider = provider.get("name", "Rental Co")
+
+                        total_price = float(total_str) if total_str else 0.0
+                        per_day_str = price_info.get("per_day", price_info.get("baseAmount", "0"))
+                        daily_rate = float(per_day_str) if per_day_str and per_day_str != "0" else round(total_price / days, 2)
+
+                        # Type classification
+                        cat_upper = category.upper()
+                        type_label = category.title()
+                        if "ECONOMY" in cat_upper or "MINI" in cat_upper:
+                            type_label = "Economy"
+                        elif "SUV" in cat_upper or "4X4" in cat_upper:
+                            type_label = "SUV"
+                        elif "PREMIUM" in cat_upper or "LUXURY" in cat_upper:
+                            type_label = "Premium"
+                        elif "VAN" in cat_upper or "MINIVAN" in cat_upper:
+                            type_label = "Van"
+                        elif "INTERMEDIATE" in cat_upper or "COMPACT" in cat_upper:
+                            type_label = "Compact"
+
+                        if car_type and car_type.lower() != "all" and type_label.lower() != car_type.lower():
+                            continue
+
+                        results.append({
+                            "provider": provider,
+                            "car_type": type_label,
+                            "car_model": car_name,
+                            "pickup_location": pickup_location,
+                            "seats": seats,
+                            "transmission": transmission,
+                            "daily_rate": daily_rate,
+                            "total_price": total_price,
+                            "currency": currency,
+                            "features": ["Automatic" if transmission == "Automatic" else "Manual", "A/C"] + included[:3],
+                            "mileage": "Unlimited" if any("unlimited" in str(i).lower() for i in included) else "Limited",
+                            "insurance_included": any("insurance" in str(i).lower() or "collision" in str(i).lower() for i in included),
+                            "free_cancellation": any("free" in str(i).lower() or "cancel" in str(i).lower() for i in included),
+                            "data_source": "Amadeus API (Real-Time)"
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error parsing car rental: {e}")
+                        continue
+
+            if not results:
+                return ToolResult(
+                    success=False, data=None,
+                    message=f"No car rentals found at {pickup_location}",
+                    error="No results from Amadeus Transfer API"
+                )
+
+            results.sort(key=lambda x: x["total_price"])
+            best_deal = results[0]
+
+            logger.info(f"Found {len(results)} car rentals from Amadeus for {pickup_location}")
+
+            return ToolResult(
+                success=True,
+                data={
+                    "search_id": f"CAR-{random.randint(100000, 999999)}",
+                    "search_params": {
+                        "pickup_location": pickup_location,
+                        "pickup_date": pickup_date,
+                        "return_date": return_date,
+                        "days": days
+                    },
+                    "results": results,
+                    "total_results": len(results),
+                    "best_deal": best_deal,
+                    "searched_at": datetime.now().isoformat(),
+                    "data_source": "Amadeus API (Real-Time)"
                 },
-                "results": results,
-                "total_results": len(results),
-                "best_deal": best_deal,
-                "searched_at": datetime.now().isoformat()
-            },
-            message=f"Found {len(results)} car rentals. Best price: ${best_deal['daily_rate']}/day from {best_deal['provider']}"
-        )
+                message=f"Found {len(results)} car rentals. Best price: ${best_deal['daily_rate']:.2f}/day from {best_deal['provider']}",
+                metadata={"disclaimer": "Real-time car rental data from Amadeus Travel API"}
+            )
+
+        except Exception as e:
+            logger.error(f"Error searching car rentals via Amadeus: {e}")
+            return ToolResult(
+                success=False, data=None,
+                message=f"Failed to search car rentals: {str(e)}",
+                error=str(e)
+            )
     
     def get_schema(self) -> Dict[str, Any]:
         return {

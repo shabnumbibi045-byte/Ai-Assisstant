@@ -174,8 +174,9 @@ export const useAuthStore = create(
         set({
           user: {
             id: 'demo-user',
-            user_id: 'demo-user-uuid',
+            user_id: 'demo-user-001',
             email: 'demo@lestrap.com',
+            name: 'Demo User',
             firstName: 'Demo',
             lastName: 'User',
             full_name: 'Demo User',

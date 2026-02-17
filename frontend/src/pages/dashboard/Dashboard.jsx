@@ -69,7 +69,7 @@ const Dashboard = () => {
             <span className="text-primary-400 font-medium">AN INTELLIGENT AI</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-display font-bold text-white mb-2">
-            Welcome back, {user?.name?.split(' ')[0] || 'there'}!
+            Welcome back, {user?.full_name?.split(' ')[0] || user?.name?.split(' ')[0] || 'there'}!
           </h1>
           <p className="text-slate-400 text-lg mb-6 max-w-2xl">
             Your AI-powered assistant for banking, stocks, travel, and legal research.

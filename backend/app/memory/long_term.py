@@ -76,12 +76,15 @@ class LongTermMemory:
         Args:
             database_url: SQLAlchemy database URL
         """
+        engine_kwargs = {"echo": False}
+        # SQLite doesn't support pool_size/max_overflow/pool_pre_ping
+        if "sqlite" not in database_url:
+            engine_kwargs["pool_pre_ping"] = True
+            engine_kwargs["pool_size"] = 10
+            engine_kwargs["max_overflow"] = 20
         self.engine = create_async_engine(
             database_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20
+            **engine_kwargs
         )
         self.async_session = async_sessionmaker(
             self.engine,

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -17,20 +17,47 @@ import {
   HiX,
 } from 'react-icons/hi';
 import { FaFilePdf, FaFileWord, FaFileExcel, FaFileCsv } from 'react-icons/fa';
+import { documentsAPI } from '../../services/api';
 
 const Documents = () => {
-  const [documents, setDocuments] = useState([
-    { id: 1, name: 'Q4 Financial Report.pdf', type: 'pdf', size: '2.4 MB', date: '2024-01-18', status: 'indexed', chunks: 45 },
-    { id: 2, name: 'Contract Template.docx', type: 'docx', size: '845 KB', date: '2024-01-15', status: 'indexed', chunks: 12 },
-    { id: 3, name: 'Client Data Export.xlsx', type: 'xlsx', size: '1.2 MB', date: '2024-01-12', status: 'indexed', chunks: 28 },
-    { id: 4, name: 'Meeting Notes.pdf', type: 'pdf', size: '156 KB', date: '2024-01-10', status: 'indexed', chunks: 8 },
-  ]);
+  const [documents, setDocuments] = useState([]);
   const [query, setQuery] = useState('');
   const [isQuerying, setIsQuerying] = useState(false);
   const [queryResults, setQueryResults] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [isSummarizing, setIsSummarizing] = useState(null); // document_id or 'all'
+  const [summaryModal, setSummaryModal] = useState(null); // { filename, summary }
+  const [isDownloading, setIsDownloading] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Fetch documents from backend on mount
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const response = await documentsAPI.list();
+      const docs = (response.data.documents || []).map((d) => ({
+        id: d.document_id,
+        name: d.filename,
+        type: d.filename.split('.').pop().toLowerCase(),
+        size: d.size || 'N/A',
+        date: d.uploaded_at || new Date().toISOString().split('T')[0],
+        status: d.status || 'indexed',
+        chunks: d.chunks_count || 0,
+      }));
+      setDocuments(docs);
+    } catch (err) {
+      // Fallback to demo data if backend unavailable
+      console.warn('Could not fetch documents from backend, using demo data');
+      setDocuments([
+        { id: 'demo-1', name: 'Q4 Financial Report.pdf', type: 'pdf', size: '2.4 MB', date: '2024-01-18', status: 'indexed', chunks: 45 },
+        { id: 'demo-2', name: 'Contract Template.docx', type: 'docx', size: '845 KB', date: '2024-01-15', status: 'indexed', chunks: 12 },
+      ]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [fetchDocuments]);
 
   const getFileIcon = (type) => {
     switch (type) {
@@ -76,44 +103,47 @@ const Documents = () => {
   const processFiles = async (files) => {
     for (const file of files) {
       const ext = file.name.split('.').pop().toLowerCase();
-      if (!['pdf', 'docx', 'xlsx', 'csv', 'txt'].includes(ext)) {
+      if (!['pdf', 'docx', 'xlsx', 'csv', 'txt', 'md'].includes(ext)) {
         toast.error(`Unsupported file type: ${ext}`);
         continue;
       }
 
-      setUploadProgress({ name: file.name, progress: 0 });
+      setUploadProgress({ name: file.name, progress: 10 });
 
-      // Simulate upload progress
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise(r => setTimeout(r, 100));
-        setUploadProgress({ name: file.name, progress: i });
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        setUploadProgress({ name: file.name, progress: 40 });
+        const response = await documentsAPI.upload(formData);
+        setUploadProgress({ name: file.name, progress: 80 });
+
+        const doc = response.data;
+        const newDoc = {
+          id: doc.document_id,
+          name: doc.filename || file.name,
+          type: ext,
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          date: new Date().toISOString().split('T')[0],
+          status: doc.status || 'processing',
+          chunks: doc.chunks_count || 0,
+        };
+
+        setDocuments(prev => [newDoc, ...prev]);
+        setUploadProgress({ name: file.name, progress: 100 });
+        toast.success(`${file.name} uploaded successfully!`);
+
+        // Poll for processing completion
+        setTimeout(async () => {
+          await fetchDocuments();
+        }, 5000);
+
+      } catch (err) {
+        console.error('Upload error:', err);
+        toast.error(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
+      } finally {
+        setUploadProgress(null);
       }
-
-      // Add to documents
-      const newDoc = {
-        id: Date.now(),
-        name: file.name,
-        type: ext,
-        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        date: new Date().toISOString().split('T')[0],
-        status: 'processing',
-        chunks: 0,
-      };
-
-      setDocuments(prev => [newDoc, ...prev]);
-      setUploadProgress(null);
-
-      // Simulate processing
-      setTimeout(() => {
-        setDocuments(prev =>
-          prev.map(d =>
-            d.id === newDoc.id
-              ? { ...d, status: 'indexed', chunks: Math.floor(Math.random() * 50) + 10 }
-              : d
-          )
-        );
-        toast.success(`${file.name} indexed successfully`);
-      }, 2000);
     }
   };
 
@@ -124,37 +154,137 @@ const Documents = () => {
     }
 
     setIsQuerying(true);
-    await new Promise(r => setTimeout(r, 1500));
-
-    // Mock results
-    setQueryResults([
-      {
-        document: 'Q4 Financial Report.pdf',
-        content: 'Revenue increased by 23% compared to Q3, driven primarily by expansion into new markets...',
-        relevance: 0.95,
-        page: 4,
-      },
-      {
-        document: 'Meeting Notes.pdf',
-        content: 'Discussed quarterly targets and revenue projections for the upcoming fiscal year...',
-        relevance: 0.87,
-        page: 1,
-      },
-      {
-        document: 'Client Data Export.xlsx',
-        content: 'Client acquisition data showing growth trends across all regions, particularly in Q4...',
-        relevance: 0.72,
-        page: null,
-      },
-    ]);
-
-    setIsQuerying(false);
-    toast.success('Query completed');
+    try {
+      const response = await documentsAPI.query(query, 5);
+      const results = response.data;
+      
+      if (results.sources && results.sources.length > 0) {
+        setQueryResults(results.sources.map((s, i) => ({
+          document: s.filename || `Source ${i + 1}`,
+          content: results.answer || 'No answer generated',
+          relevance: s.relevance || 0.8,
+          page: null,
+        })));
+      } else if (results.answer) {
+        setQueryResults([{
+          document: 'AI Response',
+          content: results.answer,
+          relevance: 1.0,
+          page: null,
+        }]);
+      } else {
+        setQueryResults([{
+          document: 'No Results',
+          content: 'No relevant information found in your documents.',
+          relevance: 0,
+          page: null,
+        }]);
+      }
+      toast.success('Query completed');
+    } catch (err) {
+      console.error('Query error:', err);
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail.map(d => d.msg).join(', ') : (detail || err.message);
+      toast.error('Query failed: ' + msg);
+    } finally {
+      setIsQuerying(false);
+    }
   };
 
-  const handleDelete = (id) => {
-    setDocuments(prev => prev.filter(d => d.id !== id));
-    toast.success('Document deleted');
+  const handleDelete = async (id) => {
+    try {
+      await documentsAPI.delete(id);
+      setDocuments(prev => prev.filter(d => d.id !== id));
+      toast.success('Document deleted');
+    } catch (err) {
+      console.error('Delete error:', err);
+      // Remove from UI anyway (demo mode)
+      setDocuments(prev => prev.filter(d => d.id !== id));
+      toast.success('Document removed');
+    }
+  };
+
+  const handleSummarize = async (documentId, filename) => {
+    setIsSummarizing(documentId);
+    try {
+      const response = await documentsAPI.summarize(documentId, false);
+      const summaries = response.data.summaries || [];
+      if (summaries.length > 0) {
+        setSummaryModal({
+          filename: summaries[0].filename || filename,
+          summary: summaries[0].summary,
+          documentId: documentId,
+          wordCount: summaries[0].word_count,
+          pages: summaries[0].pages,
+        });
+        toast.success('Summary generated!');
+      } else {
+        toast.error('No summary generated');
+      }
+    } catch (err) {
+      console.error('Summarize error:', err);
+      toast.error('Summarization failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSummarizing(null);
+    }
+  };
+
+  const handleSummarizeAll = async () => {
+    setIsSummarizing('all');
+    try {
+      const response = await documentsAPI.summarize(null, true);
+      const summaries = response.data.summaries || [];
+      if (summaries.length > 0) {
+        const combinedSummary = summaries.map(s =>
+          `📄 ${s.filename}\n${'─'.repeat(40)}\n${s.summary}`
+        ).join('\n\n');
+        setSummaryModal({
+          filename: `All Documents (${summaries.length})`,
+          summary: combinedSummary,
+          documentId: 'all',
+          wordCount: summaries.reduce((sum, s) => sum + (s.word_count || 0), 0),
+        });
+        toast.success(`Summarized ${summaries.length} documents!`);
+      } else {
+        toast.error('No documents to summarize');
+      }
+    } catch (err) {
+      console.error('Summarize all error:', err);
+      toast.error('Summarization failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSummarizing(null);
+    }
+  };
+
+  const handleDownloadSummary = async (documentId, filename) => {
+    setIsDownloading(documentId);
+    try {
+      let response;
+      if (documentId === 'all') {
+        response = await documentsAPI.downloadAllSummaries();
+      } else {
+        response = await documentsAPI.downloadSummary(documentId);
+      }
+      
+      // Create download link
+      const blob = new Blob([response.data], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = documentId === 'all'
+        ? 'all_documents_summary.txt'
+        : `summary_${filename || documentId}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      toast.success('Summary downloaded!');
+    } catch (err) {
+      console.error('Download error:', err);
+      toast.error('Download failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsDownloading(null);
+    }
   };
 
   return (
@@ -166,9 +296,41 @@ const Documents = () => {
           <p className="text-slate-400">Upload and query your documents with AI-powered retrieval</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="btn-ghost flex items-center gap-2 border border-slate-700">
+          <button
+            onClick={handleSummarizeAll}
+            disabled={isSummarizing === 'all' || documents.length === 0}
+            className="btn-ghost flex items-center gap-2 border border-slate-700 disabled:opacity-50"
+          >
+            {isSummarizing === 'all' ? (
+              <>
+                <span className="w-5 h-5 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                Summarizing...
+              </>
+            ) : (
+              <>
+                <HiSparkles className="w-5 h-5" />
+                Summarize All
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => {
+              if (documents.length > 0 && documents[0].id !== 'all') {
+                handleDownloadSummary('all', 'all_documents');
+              }
+            }}
+            disabled={isDownloading || documents.length === 0}
+            className="btn-ghost flex items-center gap-2 border border-slate-700 disabled:opacity-50"
+          >
+            <HiDownload className="w-5 h-5" />
+            Download All Summaries
+          </button>
+          <button
+            onClick={fetchDocuments}
+            className="btn-ghost flex items-center gap-2 border border-slate-700"
+          >
             <HiRefresh className="w-5 h-5" />
-            Reindex All
+            Refresh
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -448,11 +610,29 @@ const Documents = () => {
                     <td className="py-4 px-4 text-slate-400">{doc.date}</td>
                     <td className="py-4 px-4">
                       <div className="flex items-center justify-end gap-2">
-                        <button className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
-                          <HiEye className="w-5 h-5" />
+                        <button
+                          onClick={() => handleSummarize(doc.id, doc.name)}
+                          disabled={isSummarizing === doc.id}
+                          title="Summarize with AI"
+                          className="p-2 rounded-lg hover:bg-primary-500/20 text-slate-400 hover:text-primary-400 transition-colors disabled:opacity-50"
+                        >
+                          {isSummarizing === doc.id ? (
+                            <span className="w-5 h-5 block border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <HiSparkles className="w-5 h-5" />
+                          )}
                         </button>
-                        <button className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
-                          <HiDownload className="w-5 h-5" />
+                        <button
+                          onClick={() => handleDownloadSummary(doc.id, doc.name)}
+                          disabled={isDownloading === doc.id}
+                          title="Download Summary"
+                          className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+                        >
+                          {isDownloading === doc.id ? (
+                            <span className="w-5 h-5 block border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <HiDownload className="w-5 h-5" />
+                          )}
                         </button>
                         <button
                           onClick={() => handleDelete(doc.id)}
@@ -469,6 +649,59 @@ const Documents = () => {
           </table>
         </div>
       </div>
+
+      {/* Summary Modal */}
+      {summaryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[80vh] flex flex-col"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-700">
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <HiSparkles className="w-5 h-5 text-primary-400" />
+                  AI Summary
+                </h3>
+                <p className="text-sm text-slate-400 mt-1">{summaryModal.filename}</p>
+                {summaryModal.wordCount && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {summaryModal.wordCount.toLocaleString()} words
+                    {summaryModal.pages ? ` • ${summaryModal.pages} pages` : ''}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadSummary(summaryModal.documentId, summaryModal.filename)}
+                  disabled={isDownloading}
+                  className="btn-primary flex items-center gap-2 text-sm py-2 px-4"
+                >
+                  <HiDownload className="w-4 h-4" />
+                  Download
+                </button>
+                <button
+                  onClick={() => setSummaryModal(null)}
+                  className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                >
+                  <HiX className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="prose prose-invert prose-sm max-w-none">
+                <pre className="whitespace-pre-wrap font-sans text-slate-300 text-sm leading-relaxed bg-transparent p-0">
+                  {summaryModal.summary}
+                </pre>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

@@ -3,9 +3,11 @@
 import logging
 import uuid
 import os
+import io
 from typing import Optional, List
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.schemas import RAGQueryRequest, RAGQueryResponse
@@ -141,6 +143,12 @@ async def upload_document(
         with open(file_path, 'wb') as f:
             f.write(content)
         
+        # Save original filename metadata
+        import json as _json
+        meta_path = user_dir / f"{document_id}.meta.json"
+        with open(meta_path, 'w') as mf:
+            _json.dump({"original_filename": file.filename}, mf)
+        
         # Process document in background
         background_tasks.add_task(
             process_document_background,
@@ -188,7 +196,21 @@ async def query_documents(
             chunks_used=result.get("chunks_used", 0)
         )
         
+    except ConnectionError:
+        logger.warning("Vector store (Qdrant) not available for RAG query")
+        return RAGQueryResponse(
+            answer="Document query is currently unavailable. The vector database (Qdrant) is not connected. Your documents are stored and can be summarized directly.",
+            sources=[],
+            chunks_used=0
+        )
     except Exception as e:
+        if "connection" in str(e).lower():
+            logger.warning(f"Vector store connection error: {e}")
+            return RAGQueryResponse(
+                answer="Document query is currently unavailable. The vector database (Qdrant) is not connected. Your documents are stored and can be summarized directly.",
+                sources=[],
+                chunks_used=0
+            )
         logger.error(f"Query error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -205,12 +227,23 @@ async def list_documents(
             return DocumentListResponse(documents=[], total=0)
         
         documents = []
+        import json as _json
         for file_path in user_dir.iterdir():
-            if file_path.is_file():
+            if file_path.is_file() and not file_path.name.endswith('.meta.json'):
                 doc_id = file_path.stem
+                # Try to read original filename from metadata
+                meta_path = user_dir / f"{doc_id}.meta.json"
+                original_name = file_path.name
+                if meta_path.exists():
+                    try:
+                        with open(meta_path, 'r') as mf:
+                            meta = _json.load(mf)
+                            original_name = meta.get('original_filename', file_path.name)
+                    except Exception:
+                        pass
                 documents.append(DocumentInfo(
                     document_id=doc_id,
-                    filename=file_path.name,
+                    filename=original_name,
                     status="indexed"
                 ))
         
@@ -252,5 +285,290 @@ async def delete_document(
         raise
     except Exception as e:
         logger.error(f"Delete document error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SummarizeRequest(BaseModel):
+    document_id: Optional[str] = None
+    summarize_all: bool = False
+
+
+class SummaryItem(BaseModel):
+    document_id: str
+    filename: str
+    summary: str
+    word_count: Optional[int] = None
+    pages: Optional[int] = None
+
+
+class SummarizeResponse(BaseModel):
+    summaries: List[SummaryItem]
+    total_documents: int
+    downloadable: bool = True
+
+
+@router.post("/summarize", response_model=SummarizeResponse)
+async def summarize_documents(
+    request: SummarizeRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Summarize uploaded documents using LLM.
+    
+    - If document_id is provided, summarize that specific document.
+    - If summarize_all is True, summarize all documents.
+    - Otherwise, summarize the most recently uploaded document.
+    """
+    try:
+        user_dir = DOCUMENTS_DIR / current_user.user_id
+        
+        if not user_dir.exists():
+            raise HTTPException(status_code=404, detail="No documents found. Please upload documents first.")
+        
+        all_files = [f for f in user_dir.iterdir() if f.is_file()]
+        if not all_files:
+            raise HTTPException(status_code=404, detail="No documents found.")
+        
+        # Determine target files
+        target_files = []
+        if request.document_id:
+            for f in all_files:
+                if f.stem == request.document_id:
+                    target_files.append(f)
+                    break
+            if not target_files:
+                raise HTTPException(status_code=404, detail="Document not found")
+        elif request.summarize_all:
+            target_files = all_files
+        else:
+            target_files = sorted(all_files, key=lambda f: f.stat().st_mtime, reverse=True)[:1]
+        
+        loader = DocumentLoader()
+        summaries = []
+        
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        for file_path in target_files[:10]:
+            try:
+                doc_data = await loader.load(str(file_path))
+                text = doc_data['text']
+                metadata = doc_data['metadata']
+                
+                # Truncate for LLM context
+                max_chars = 8000
+                truncated = text[:max_chars] + ("..." if len(text) > max_chars else "")
+                
+                response = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a document summarizer. Provide a clear, comprehensive summary with key points, important details, and main conclusions. Use bullet points for key findings."},
+                        {"role": "user", "content": f"Please summarize this document titled '{metadata.get('filename', 'Unknown')}':\n\n{truncated}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                summary_text = response.choices[0].message.content
+                
+                summaries.append(SummaryItem(
+                    document_id=file_path.stem,
+                    filename=metadata.get('filename', file_path.name),
+                    summary=summary_text,
+                    word_count=len(text.split()),
+                    pages=metadata.get('pages', None)
+                ))
+            except Exception as e:
+                logger.error(f"Error summarizing {file_path.name}: {e}")
+                summaries.append(SummaryItem(
+                    document_id=file_path.stem,
+                    filename=file_path.name,
+                    summary=f"Error summarizing: {str(e)}"
+                ))
+        
+        return SummarizeResponse(
+            summaries=summaries,
+            total_documents=len(summaries),
+            downloadable=True
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Summarize error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download-summary/{document_id}")
+async def download_summary(
+    document_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Generate and download a summary of a document as a text file.
+    """
+    try:
+        user_dir = DOCUMENTS_DIR / current_user.user_id
+        
+        if not user_dir.exists():
+            raise HTTPException(status_code=404, detail="No documents found")
+        
+        # Find the document
+        target_file = None
+        for f in user_dir.iterdir():
+            if f.stem == document_id and f.is_file():
+                target_file = f
+                break
+        
+        if not target_file:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Load and summarize
+        loader = DocumentLoader()
+        doc_data = await loader.load(str(target_file))
+        text = doc_data['text']
+        metadata = doc_data['metadata']
+        
+        max_chars = 8000
+        truncated = text[:max_chars] + ("..." if len(text) > max_chars else "")
+        
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a professional document summarizer. Create a well-structured summary report with:\n1. Document Title\n2. Executive Summary (2-3 sentences)\n3. Key Points (bullet list)\n4. Detailed Summary\n5. Conclusions/Recommendations\n\nFormat it cleanly for download."},
+                {"role": "user", "content": f"Create a detailed summary report for this document titled '{metadata.get('filename', 'Unknown')}':\n\n{truncated}"}
+            ],
+            temperature=0.3,
+            max_tokens=2000
+        )
+        summary_text = response.choices[0].message.content
+        
+        # Build the downloadable report
+        report = f"""{'='*60}
+DOCUMENT SUMMARY REPORT
+Generated by Salim AI Assistant
+{'='*60}
+
+Source Document: {metadata.get('filename', 'Unknown')}
+Format: {metadata.get('format', 'unknown').upper()}
+Word Count: {len(text.split())}
+Pages: {metadata.get('pages', 'N/A')}
+Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+{'='*60}
+
+{summary_text}
+
+{'='*60}
+End of Summary Report
+{'='*60}
+"""
+        
+        # Return as downloadable file
+        buffer = io.BytesIO(report.encode('utf-8'))
+        filename = f"summary_{metadata.get('filename', document_id).rsplit('.', 1)[0]}.txt"
+        
+        return StreamingResponse(
+            buffer,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download-all-summaries")
+async def download_all_summaries(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Generate and download summaries of all uploaded documents as a single file.
+    """
+    try:
+        user_dir = DOCUMENTS_DIR / current_user.user_id
+        
+        if not user_dir.exists():
+            raise HTTPException(status_code=404, detail="No documents found")
+        
+        all_files = [f for f in user_dir.iterdir() if f.is_file()]
+        if not all_files:
+            raise HTTPException(status_code=404, detail="No documents found")
+        
+        loader = DocumentLoader()
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        report_parts = [
+            f"{'='*60}",
+            "COMPLETE DOCUMENT SUMMARY REPORT",
+            "Generated by Salim AI Assistant",
+            f"Total Documents: {len(all_files)}",
+            f"Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"{'='*60}\n"
+        ]
+        
+        for i, file_path in enumerate(all_files[:10], 1):
+            try:
+                doc_data = await loader.load(str(file_path))
+                text = doc_data['text']
+                metadata = doc_data['metadata']
+                
+                max_chars = 6000
+                truncated = text[:max_chars] + ("..." if len(text) > max_chars else "")
+                
+                response = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Provide a concise but thorough summary with key points as bullet items."},
+                        {"role": "user", "content": f"Summarize this document titled '{metadata.get('filename', 'Unknown')}':\n\n{truncated}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=800
+                )
+                summary = response.choices[0].message.content
+                
+                report_parts.extend([
+                    f"\n{'─'*60}",
+                    f"Document {i}: {metadata.get('filename', file_path.name)}",
+                    f"Format: {metadata.get('format', 'unknown').upper()} | Words: {len(text.split())} | Pages: {metadata.get('pages', 'N/A')}",
+                    f"{'─'*60}\n",
+                    summary,
+                    ""
+                ])
+            except Exception as e:
+                report_parts.extend([
+                    f"\nDocument {i}: {file_path.name}",
+                    f"Error: {str(e)}\n"
+                ])
+        
+        report_parts.extend([
+            f"\n{'='*60}",
+            "End of Summary Report",
+            f"{'='*60}"
+        ])
+        
+        report = "\n".join(report_parts)
+        buffer = io.BytesIO(report.encode('utf-8'))
+        
+        return StreamingResponse(
+            buffer,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": 'attachment; filename="all_documents_summary.txt"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download all summaries error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

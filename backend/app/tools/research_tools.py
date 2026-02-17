@@ -1277,6 +1277,270 @@ class GenerateResearchReportTool(BaseTool):
 
 
 # ============================================
+# DOCUMENT SUMMARIZATION & LISTING TOOLS
+# ============================================
+
+class SummarizeDocumentTool(BaseTool):
+    """Summarize an uploaded document using LLM."""
+
+    def __init__(self):
+        super().__init__(
+            name="summarize_document",
+            description="Summarize an uploaded document. Can summarize a specific document by name/ID, or summarize all uploaded documents.",
+            category=ToolCategory.RESEARCH
+        )
+
+    async def execute(
+        self,
+        user_id: str,
+        parameters: Dict[str, Any],
+        permissions: Optional[Dict[str, bool]] = None
+    ) -> ToolResult:
+        if not self.check_permission("research_read", permissions):
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Permission denied",
+                error="User does not have research_read permission"
+            )
+
+        document_name = parameters.get("document_name", "")
+        summarize_all = parameters.get("summarize_all", False)
+
+        try:
+            from pathlib import Path
+            from app.config import settings
+            from app.rag.document_loader import DocumentLoader
+
+            docs_dir = Path(settings.DOCUMENTS_DIR) / user_id
+            if not docs_dir.exists():
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message="No documents found. Please upload documents first.",
+                    error="No documents directory"
+                )
+
+            # Find matching documents
+            all_files = [f for f in docs_dir.iterdir() if f.is_file() and not f.name.endswith('.meta.json')]
+            if not all_files:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    message="No documents found. Please upload documents first.",
+                    error="No documents found"
+                )
+
+            target_files = []
+            if summarize_all:
+                target_files = all_files
+            elif document_name:
+                # Fuzzy match by name
+                name_lower = document_name.lower()
+                for f in all_files:
+                    if name_lower in f.name.lower() or name_lower in f.stem.lower():
+                        target_files.append(f)
+                if not target_files:
+                    # Try matching any file
+                    target_files = all_files[:1]
+            else:
+                # Default: summarize the most recent file
+                target_files = sorted(all_files, key=lambda f: f.stat().st_mtime, reverse=True)[:1]
+
+            summaries = []
+            loader = DocumentLoader()
+
+            for file_path in target_files[:5]:  # Max 5 docs at once
+                try:
+                    # Read original filename from metadata
+                    import json as _meta_json
+                    original_name = file_path.name
+                    meta_file = file_path.parent / f"{file_path.stem}.meta.json"
+                    if meta_file.exists():
+                        try:
+                            with open(meta_file, 'r') as mf:
+                                _meta = _meta_json.load(mf)
+                                original_name = _meta.get('original_filename', file_path.name)
+                        except Exception:
+                            pass
+
+                    doc_data = await loader.load(str(file_path))
+                    text = doc_data['text']
+                    metadata = doc_data['metadata']
+
+                    # Truncate for LLM context window
+                    max_chars = 8000
+                    truncated = text[:max_chars] + ("..." if len(text) > max_chars else "")
+
+                    # Use OpenAI for summarization
+                    from app.config import settings as app_settings
+                    from openai import AsyncOpenAI
+
+                    client = AsyncOpenAI(api_key=app_settings.OPENAI_API_KEY)
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "You are a document summarizer. Provide a clear, comprehensive summary of the document. Include key points, important details, and main conclusions."},
+                            {"role": "user", "content": f"Please summarize this document titled '{metadata.get('filename', 'Unknown')}':\n\n{truncated}"}
+                        ],
+                        temperature=0.3,
+                        max_tokens=1000
+                    )
+                    summary_text = response.choices[0].message.content
+
+                    summaries.append({
+                        "document_id": file_path.stem,
+                        "filename": original_name,
+                        "format": metadata.get('format', file_path.suffix),
+                        "size_bytes": metadata.get('size', file_path.stat().st_size),
+                        "summary": summary_text,
+                        "word_count": len(text.split()),
+                        "pages": metadata.get('pages', None)
+                    })
+                except Exception as e:
+                    logger.error(f"Error summarizing {file_path.name}: {e}")
+                    summaries.append({
+                        "document_id": file_path.stem,
+                        "filename": file_path.name,
+                        "summary": f"Error summarizing document: {str(e)}",
+                        "error": True
+                    })
+
+            return ToolResult(
+                success=True,
+                data={
+                    "summaries": summaries,
+                    "total_documents": len(summaries),
+                    "downloadable": True
+                },
+                message=f"Successfully summarized {len(summaries)} document(s)"
+            )
+
+        except Exception as e:
+            logger.error(f"Summarize document error: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Error: {str(e)}",
+                error=str(e)
+            )
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_name": {
+                        "type": "string",
+                        "description": "Name or partial name of the document to summarize. If empty, summarizes the most recent document."
+                    },
+                    "summarize_all": {
+                        "type": "boolean",
+                        "description": "If true, summarize all uploaded documents",
+                        "default": False
+                    }
+                },
+                "required": []
+            }
+        }
+
+
+class ListUploadedDocsTool(BaseTool):
+    """List all documents uploaded by the user."""
+
+    def __init__(self):
+        super().__init__(
+            name="list_uploaded_documents",
+            description="List all documents that the user has uploaded for AI processing and summarization.",
+            category=ToolCategory.RESEARCH
+        )
+
+    async def execute(
+        self,
+        user_id: str,
+        parameters: Dict[str, Any],
+        permissions: Optional[Dict[str, bool]] = None
+    ) -> ToolResult:
+        if not self.check_permission("research_read", permissions):
+            return ToolResult(
+                success=False,
+                data=None,
+                message="Permission denied",
+                error="User does not have research_read permission"
+            )
+
+        try:
+            from pathlib import Path
+            from app.config import settings
+
+            docs_dir = Path(settings.DOCUMENTS_DIR) / user_id
+            if not docs_dir.exists():
+                return ToolResult(
+                    success=True,
+                    data={"documents": [], "total": 0},
+                    message="No documents uploaded yet."
+                )
+
+            documents = []
+            for file_path in docs_dir.iterdir():
+                if file_path.is_file() and not file_path.name.endswith('.meta.json'):
+                    stat = file_path.stat()
+                    # Try reading original filename from metadata
+                    import json as _json
+                    original_name = file_path.name
+                    meta_path = docs_dir / f"{file_path.stem}.meta.json"
+                    if meta_path.exists():
+                        try:
+                            with open(meta_path, 'r') as mf:
+                                meta = _json.load(mf)
+                                original_name = meta.get('original_filename', file_path.name)
+                        except Exception:
+                            pass
+                    documents.append({
+                        "document_id": file_path.stem,
+                        "filename": original_name,
+                        "format": file_path.suffix.lstrip('.'),
+                        "size_bytes": stat.st_size,
+                        "size_display": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / (1024 * 1024):.2f} MB",
+                        "uploaded_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        "status": "indexed"
+                    })
+
+            documents.sort(key=lambda d: d["uploaded_at"], reverse=True)
+
+            return ToolResult(
+                success=True,
+                data={
+                    "documents": documents,
+                    "total": len(documents)
+                },
+                message=f"You have {len(documents)} uploaded document(s)."
+            )
+
+        except Exception as e:
+            logger.error(f"List documents error: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                message=f"Error: {str(e)}",
+                error=str(e)
+            )
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+
+
+# ============================================
 # RESEARCH TOOLS COLLECTION
 # ============================================
 
@@ -1303,6 +1567,10 @@ class ResearchTools:
             SaveDocumentTool(),
             ListDocumentsTool(),
             GetDocumentHistoryTool(),
+
+            # Document Summarization & Upload Management
+            SummarizeDocumentTool(),
+            ListUploadedDocsTool(),
 
             # General Research
             ConductResearchTool(),

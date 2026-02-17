@@ -18,6 +18,7 @@ import Chat from './pages/dashboard/Chat';
 import Banking from './pages/dashboard/Banking';
 import Stocks from './pages/dashboard/Stocks';
 import Travel from './pages/dashboard/Travel';
+import FlightBooking from './pages/dashboard/FlightBooking';
 import Research from './pages/dashboard/Research';
 import Documents from './pages/dashboard/Documents';
 import Voice from './pages/dashboard/Voice';
@@ -108,6 +109,7 @@ function App() {
         <Route path="/banking" element={<Banking />} />
         <Route path="/stocks" element={<Stocks />} />
         <Route path="/travel" element={<Travel />} />
+        <Route path="/travel/book" element={<FlightBooking />} />
         <Route path="/research" element={<Research />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/voice" element={<Voice />} />

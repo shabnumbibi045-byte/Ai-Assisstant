@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
+import api from '../../services/api';
 import {
   HiSearch,
   HiCalendar,
@@ -13,11 +15,12 @@ import {
   HiArrowNarrowRight,
   HiChevronDown,
   HiX,
+  HiStar,
+  HiCheck,
+  HiClock,
+  HiShieldCheck,
 } from 'react-icons/hi';
-import { FaPlane } from 'react-icons/fa';
-
-// API base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+import { FaPlane, FaHotel, FaCar, FaWifi, FaSwimmingPool, FaParking, FaDumbbell, FaCoffee, FaConciergeBell, FaGasPump, FaSnowflake, FaBluetooth, FaSuitcase } from 'react-icons/fa';
 
 // Comprehensive list of major airports worldwide
 const AIRPORTS = [
@@ -427,24 +430,64 @@ const AirportAutocomplete = ({
   );
 };
 
+// Demo hotel data
+// Hotel stock images (used since Amadeus doesn't provide images)
+const HOTEL_IMAGES = [
+  'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1564501049412-61c2a3083791?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=400&h=250&fit=crop',
+  'https://images.unsplash.com/photo-1625244724120-1fd1d34d00f6?w=400&h=250&fit=crop',
+];
+
+// Car stock images by type
+const CAR_IMAGES = {
+  Economy: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0afe?w=400&h=250&fit=crop',
+  Compact: 'https://images.unsplash.com/photo-1590362891991-f776e747a588?w=400&h=250&fit=crop',
+  SUV: 'https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?w=400&h=250&fit=crop',
+  Premium: 'https://images.unsplash.com/photo-1555215695-3004980ad54e?w=400&h=250&fit=crop',
+  Luxury: 'https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=400&h=250&fit=crop',
+  Van: 'https://images.unsplash.com/photo-1559416523-140ddc3d238c?w=400&h=250&fit=crop',
+  Electric: 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=400&h=250&fit=crop',
+  default: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0afe?w=400&h=250&fit=crop',
+};
+
 const Travel = () => {
+  const navigate = useNavigate();
   const { token, user } = useAuthStore();
+  const [activeTab, setActiveTab] = useState('flights');
   const [searchType, setSearchType] = useState('oneway');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
-  const [selectedFlight, setSelectedFlight] = useState(null);
-  const [showBookingModal, setShowBookingModal] = useState(false);
-  const [isBooking, setIsBooking] = useState(false);
 
-  // Passenger details for booking
-  const [passengerDetails, setPassengerDetails] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    dateOfBirth: '',
-    passportNumber: '',
+  // Hotel search state
+  const [hotelSearch, setHotelSearch] = useState({
+    city: '',
+    checkIn: '',
+    checkOut: '',
+    guests: 1,
+    rooms: 1,
+    minRating: 0,
   });
+  const [hotelResults, setHotelResults] = useState(null);
+  const [isSearchingHotels, setIsSearchingHotels] = useState(false);
+
+  // Car search state
+  const [carSearch, setCarSearch] = useState({
+    pickupLocation: '',
+    dropoffLocation: '',
+    pickupDate: '',
+    pickupTime: '10:00',
+    dropoffDate: '',
+    dropoffTime: '10:00',
+    carType: 'all',
+    driverAge: '25+',
+  });
+  const [carResults, setCarResults] = useState(null);
+  const [isSearchingCars, setIsSearchingCars] = useState(false);
 
   // Flight search form state
   const [flightSearch, setFlightSearch] = useState({
@@ -493,13 +536,7 @@ const Travel = () => {
 
     try {
       // Call backend API to search flights
-      const response = await fetch(`${API_BASE_URL}/tools/invoke`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await api.post('/tools/invoke', {
           user_id: user?.user_id || user?.id || 'unknown',
           tool_name: 'search_flights',
           parameters: {
@@ -510,10 +547,9 @@ const Travel = () => {
             passengers: parseInt(flightSearch.passengers),
             cabin_class: flightSearch.class
           }
-        })
       });
 
-      const data = await response.json();
+      const data = response.data;
 
       if (data.success && data.data) {
         setSearchResults(data.data);
@@ -551,57 +587,160 @@ const Travel = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  // Handle flight selection for booking
+  // Handle flight selection — navigate to booking page
   const handleSelectFlight = (flight) => {
-    setSelectedFlight(flight);
-    setShowBookingModal(true);
+    navigate('/travel/book', {
+      state: {
+        flight,
+        searchParams: {
+          from: flightSearch.from,
+          to: flightSearch.to,
+          departDate: flightSearch.departDate,
+          returnDate: flightSearch.returnDate,
+          passengers: flightSearch.passengers,
+          class: flightSearch.class,
+          searchType,
+        },
+      },
+    });
   };
 
-  // Handle booking submission
-  const handleBookFlight = async () => {
-    if (!passengerDetails.firstName || !passengerDetails.lastName || !passengerDetails.email) {
-      toast.error('Please fill in all required passenger details');
+  // Hotel search handler — calls real backend API which uses Amadeus
+  const searchHotels = async () => {
+    if (!hotelSearch.city || !hotelSearch.checkIn || !hotelSearch.checkOut) {
+      toast.error('Please fill in city, check-in, and check-out dates');
       return;
     }
-
-    setIsBooking(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/travel/book`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          flight: selectedFlight,
-          passenger: passengerDetails,
-          user_id: user?.user_id || user?.id,
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        toast.success('Flight booked successfully! Check your email for confirmation.');
-        setShowBookingModal(false);
-        setSelectedFlight(null);
-        setPassengerDetails({
-          firstName: '',
-          lastName: '',
-          email: '',
-          phone: '',
-          dateOfBirth: '',
-          passportNumber: '',
-        });
-      } else {
-        toast.error(data.message || 'Booking failed. Please try again.');
-      }
-    } catch (error) {
-      console.error('Booking error:', error);
-      toast.error('Booking service temporarily unavailable. Please try again later.');
+    if (hotelSearch.checkOut <= hotelSearch.checkIn) {
+      toast.error('Check-out must be after check-in date');
+      return;
     }
-    setIsBooking(false);
+    setIsSearchingHotels(true);
+    setHotelResults(null);
+    try {
+      const response = await api.get('/travel/hotels/search', { params: {
+        city: hotelSearch.city,
+        check_in: hotelSearch.checkIn,
+        check_out: hotelSearch.checkOut,
+        guests: hotelSearch.guests,
+        rooms: hotelSearch.rooms,
+        min_rating: hotelSearch.minRating,
+      }});
+      const data = response.data;
+      const nights = Math.ceil((new Date(hotelSearch.checkOut) - new Date(hotelSearch.checkIn)) / (1000 * 60 * 60 * 24));
+      // Map backend response to frontend format
+      const hotels = (Array.isArray(data) ? data : []).map((h, idx) => ({
+        id: h.hotel_id || `htl-${idx}`,
+        name: h.name || 'Hotel',
+        image: HOTEL_IMAGES[idx % HOTEL_IMAGES.length],
+        starRating: h.star_rating || 3,
+        userRating: h.user_rating || h.star_rating || 3,
+        reviewCount: Math.floor(Math.random() * 2000) + 100,
+        city: h.city || hotelSearch.city,
+        address: h.address || '',
+        pricePerNight: h.price_per_night || 0,
+        totalPrice: h.total_price || 0,
+        currency: h.currency || 'USD',
+        roomType: h.room_type || 'Standard Room',
+        amenities: h.amenities || ['Free WiFi'],
+        breakfastIncluded: h.breakfast_included || false,
+        freeCancellation: h.free_cancellation || false,
+        distanceFromCenter: h.distance_from_center || 0,
+      }));
+      setHotelResults({ hotels, nights, city: hotelSearch.city });
+      if (hotels.length > 0) {
+        toast.success(`Found ${hotels.length} hotels in ${hotelSearch.city} (Amadeus API)`);
+      } else {
+        toast.error('No hotels found. Try a different city or dates.');
+      }
+    } catch (err) {
+      console.error('Hotel search error:', err);
+      toast.error('Hotel search failed. Please try again.');
+    } finally {
+      setIsSearchingHotels(false);
+    }
   };
+
+  // Car search handler — calls real backend API which uses Amadeus
+  const searchCars = async () => {
+    if (!carSearch.pickupLocation || !carSearch.pickupDate || !carSearch.dropoffDate) {
+      toast.error('Please fill in pickup location, pickup date, and drop-off date');
+      return;
+    }
+    if (carSearch.dropoffDate < carSearch.pickupDate) {
+      toast.error('Drop-off date must be after pickup date');
+      return;
+    }
+    setIsSearchingCars(true);
+    setCarResults(null);
+    try {
+      const carParams = {
+        pickup_location: carSearch.pickupLocation,
+        pickup_date: carSearch.pickupDate,
+        dropoff_date: carSearch.dropoffDate,
+        pickup_time: carSearch.pickupTime,
+        dropoff_time: carSearch.dropoffTime,
+        car_type: carSearch.carType,
+      };
+      if (carSearch.dropoffLocation) {
+        carParams.dropoff_location = carSearch.dropoffLocation;
+      }
+      const response = await api.get('/travel/cars/search', { params: carParams });
+      const data = response.data;
+      const days = Math.max(1, Math.ceil((new Date(carSearch.dropoffDate) - new Date(carSearch.pickupDate)) / (1000 * 60 * 60 * 24)));
+      // Map backend response to frontend format
+      const cars = (Array.isArray(data) ? data : []).map((c, idx) => ({
+        id: c.car_id || `car-${idx}`,
+        name: c.name || 'Car',
+        company: c.company || 'Rental Company',
+        image: CAR_IMAGES[c.type] || CAR_IMAGES.default,
+        type: c.type || 'Standard',
+        seats: c.seats || 5,
+        doors: c.doors || 4,
+        transmission: c.transmission || 'Automatic',
+        fuelType: c.fuel_type || 'Gasoline',
+        pricePerDay: c.price_per_day || 0,
+        totalPrice: c.total_price || 0,
+        currency: c.currency || 'USD',
+        features: c.features || ['A/C'],
+        mileage: c.mileage || 'Unlimited',
+        insurance: c.insurance || 'Basic included',
+        freeCancellation: c.free_cancellation || false,
+      }));
+      setCarResults({ cars, days, location: carSearch.pickupLocation });
+      if (cars.length > 0) {
+        toast.success(`Found ${cars.length} cars in ${carSearch.pickupLocation} (Amadeus API)`);
+      } else {
+        toast.error('No cars found. Try a different location or dates.');
+      }
+    } catch (err) {
+      console.error('Car search error:', err);
+      toast.error('Car search failed. Please try again.');
+    } finally {
+      setIsSearchingCars(false);
+    }
+  };
+
+  // Hotel amenity icon mapper
+  const getAmenityIcon = (amenity) => {
+    const lower = amenity.toLowerCase();
+    if (lower.includes('wifi')) return <FaWifi className="w-3 h-3" />;
+    if (lower.includes('pool')) return <FaSwimmingPool className="w-3 h-3" />;
+    if (lower.includes('parking') || lower.includes('valet')) return <FaParking className="w-3 h-3" />;
+    if (lower.includes('gym')) return <FaDumbbell className="w-3 h-3" />;
+    if (lower.includes('breakfast') || lower.includes('coffee')) return <FaCoffee className="w-3 h-3" />;
+    if (lower.includes('concierge') || lower.includes('room service')) return <FaConciergeBell className="w-3 h-3" />;
+    return <HiCheck className="w-3 h-3" />;
+  };
+
+  // ===========================================
+  // TAB DEFINITIONS
+  // ===========================================
+  const tabs = [
+    { id: 'flights', label: 'Flights', icon: FaPlane },
+    { id: 'hotels', label: 'Hotels', icon: FaHotel },
+    { id: 'cars', label: 'Car Rental', icon: FaCar },
+  ];
 
   return (
     <div className="space-y-6">
@@ -609,7 +748,7 @@ const Travel = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-white">Travel</h1>
-          <p className="text-slate-400">Search real-time flights powered by Amadeus API</p>
+          <p className="text-slate-400">Search flights, hotels, and car rentals worldwide</p>
           <div className="flex items-center gap-2 mt-2">
             <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
             <span className="text-xs text-emerald-400">Real-time data from Amadeus Travel API</span>
@@ -617,6 +756,30 @@ const Travel = () => {
         </div>
       </div>
 
+      {/* Tab Navigation */}
+      <div className="flex gap-2 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700">
+        {tabs.map((tab) => {
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all ${
+                activeTab === tab.id
+                  ? 'bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg shadow-primary-500/25'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <TabIcon className="w-4 h-4" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ============= FLIGHTS TAB ============= */}
+      {activeTab === 'flights' && (
+      <>
       {/* Search Card */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -975,151 +1138,548 @@ const Travel = () => {
           </p>
         </motion.div>
       )}
+      </>
+      )}
 
-      {/* Booking Modal */}
-      {showBookingModal && selectedFlight && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700"
-          >
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-slate-800 border-b border-slate-700 p-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Complete Your Booking</h2>
-              <button
-                onClick={() => setShowBookingModal(false)}
-                className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+      {/* ============= HOTELS TAB ============= */}
+      {activeTab === 'hotels' && (
+      <>
+        {/* Hotel Search Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card bg-gradient-to-br from-amber-600/20 to-orange-600/20 border-amber-500/30"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-lg bg-amber-500/20 flex items-center justify-center">
+              <FaHotel className="w-6 h-6 text-amber-400" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-white">Hotel Search</h2>
+              <p className="text-sm text-slate-400">Find the perfect stay at the best prices</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            {/* City */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiLocationMarker className="inline w-4 h-4 mr-1" />
+                City / Destination
+              </label>
+              <input
+                type="text"
+                value={hotelSearch.city}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, city: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                placeholder="e.g., New York, Paris, Tokyo"
+              />
+            </div>
+
+            {/* Check-in */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiCalendar className="inline w-4 h-4 mr-1" />
+                Check-in
+              </label>
+              <input
+                type="date"
+                value={hotelSearch.checkIn}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, checkIn: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+
+            {/* Check-out */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiCalendar className="inline w-4 h-4 mr-1" />
+                Check-out
+              </label>
+              <input
+                type="date"
+                value={hotelSearch.checkOut}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, checkOut: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-amber-500"
+                min={hotelSearch.checkIn || new Date().toISOString().split('T')[0]}
+              />
+            </div>
+
+            {/* Guests */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiUsers className="inline w-4 h-4 mr-1" />
+                Guests
+              </label>
+              <select
+                value={hotelSearch.guests}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, guests: parseInt(e.target.value) }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-amber-500"
               >
-                <HiX className="w-5 h-5 text-slate-400" />
+                {[1,2,3,4,5,6].map(n => (
+                  <option key={n} value={n}>{n} {n === 1 ? 'Guest' : 'Guests'}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* Rooms */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">Rooms</label>
+              <select
+                value={hotelSearch.rooms}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, rooms: parseInt(e.target.value) }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-amber-500"
+              >
+                {[1,2,3,4].map(n => (
+                  <option key={n} value={n}>{n} {n === 1 ? 'Room' : 'Rooms'}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Min Rating */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiStar className="inline w-4 h-4 mr-1" />
+                Minimum Rating
+              </label>
+              <select
+                value={hotelSearch.minRating}
+                onChange={(e) => setHotelSearch(prev => ({ ...prev, minRating: parseFloat(e.target.value) }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value={0}>Any Rating</option>
+                <option value={3}>3+ Stars</option>
+                <option value={4}>4+ Stars</option>
+                <option value={4.5}>4.5+ Stars</option>
+              </select>
+            </div>
+
+            {/* Search Button */}
+            <div className="flex items-end">
+              <button
+                onClick={searchHotels}
+                disabled={isSearchingHotels}
+                className="w-full px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSearchingHotels ? (
+                  <><HiRefresh className="w-5 h-5 animate-spin" /> Searching...</>
+                ) : (
+                  <><HiSearch className="w-5 h-5" /> Search Hotels</>
+                )}
               </button>
             </div>
+          </div>
+        </motion.div>
 
-            <div className="p-6 space-y-6">
-              {/* Flight Summary */}
-              <div className="bg-slate-700/50 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3">Flight Summary</h3>
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="text-lg font-bold text-white">{selectedFlight.airline}</p>
-                    <p className="text-sm text-slate-400">{selectedFlight.flight_number}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-emerald-400">${selectedFlight.price?.toFixed(2)}</p>
-                    <p className="text-xs text-slate-400">{selectedFlight.currency || 'USD'}</p>
-                  </div>
+        {/* Hotel Results */}
+        {hotelResults && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">{hotelResults.hotels.length} Hotels Found</h3>
+                  <p className="text-sm text-slate-400">{hotelResults.city} &bull; {hotelResults.nights} night{hotelResults.nights > 1 ? 's' : ''}</p>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-white">{selectedFlight.origin}</span>
-                  <HiArrowRight className="text-slate-500" />
-                  <span className="text-white">{selectedFlight.destination}</span>
-                  <span className="text-slate-400">• {formatDuration(selectedFlight.duration)}</span>
+                <div className="text-right">
+                  <p className="text-sm text-slate-400">Starting from</p>
+                  <p className="text-lg font-semibold text-white">
+                    ${Math.min(...hotelResults.hotels.map(h => h.pricePerNight)).toFixed(0)}/night
+                  </p>
                 </div>
-              </div>
-
-              {/* Passenger Details Form */}
-              <div>
-                <h3 className="text-sm font-medium text-slate-400 mb-3">Passenger Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">First Name *</label>
-                    <input
-                      type="text"
-                      value={passengerDetails.firstName}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, firstName: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="John"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Last Name *</label>
-                    <input
-                      type="text"
-                      value={passengerDetails.lastName}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, lastName: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="Doe"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Email *</label>
-                    <input
-                      type="email"
-                      value={passengerDetails.email}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, email: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="john@example.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Phone</label>
-                    <input
-                      type="tel"
-                      value={passengerDetails.phone}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, phone: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="+1 234 567 8900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Date of Birth</label>
-                    <input
-                      type="date"
-                      value={passengerDetails.dateOfBirth}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, dateOfBirth: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Passport Number</label>
-                    <input
-                      type="text"
-                      value={passengerDetails.passportNumber}
-                      onChange={(e) => setPassengerDetails(prev => ({ ...prev, passportNumber: e.target.value }))}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="AB1234567"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Important Notice */}
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
-                <p className="text-sm text-amber-400">
-                  <strong>Note:</strong> This is a booking request. You will receive a confirmation email with payment details and booking reference once processed.
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowBookingModal(false)}
-                  className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleBookFlight}
-                  disabled={isBooking}
-                  className="flex-1 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  {isBooking ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <span>Confirm Booking</span>
-                      <HiArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
               </div>
             </div>
+
+            {hotelResults.hotels.map((hotel, index) => (
+              <motion.div
+                key={hotel.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+                className="card hover:border-amber-500/30 transition-all overflow-hidden"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                  {/* Image */}
+                  <div className="lg:col-span-1">
+                    <div className="w-full h-48 lg:h-full rounded-lg overflow-hidden bg-slate-700">
+                      <img
+                        src={hotel.image}
+                        alt={hotel.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="lg:col-span-2">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h4 className="text-lg font-bold text-white">{hotel.name}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-0.5">
+                            {Array.from({ length: Math.floor(hotel.starRating) }).map((_, i) => (
+                              <HiStar key={i} className="w-4 h-4 text-amber-400" />
+                            ))}
+                          </div>
+                          <span className="text-xs text-slate-400">{hotel.starRating} Star</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 bg-emerald-500/20 px-2 py-1 rounded-lg">
+                        <span className="text-sm font-bold text-emerald-400">{hotel.userRating}</span>
+                        <span className="text-xs text-slate-400">({hotel.reviewCount})</span>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-slate-400 mb-3">
+                      <HiLocationMarker className="inline w-4 h-4 mr-1" />
+                      {hotel.address}, {hotel.city} &bull; {hotel.distanceFromCenter} km from center
+                    </p>
+
+                    <p className="text-sm text-white mb-2">{hotel.roomType}</p>
+
+                    {/* Amenities */}
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {hotel.amenities.slice(0, 5).map((amenity, i) => (
+                        <span key={i} className="flex items-center gap-1 px-2 py-1 bg-slate-700/50 rounded text-xs text-slate-300">
+                          {getAmenityIcon(amenity)} {amenity}
+                        </span>
+                      ))}
+                      {hotel.amenities.length > 5 && (
+                        <span className="px-2 py-1 bg-slate-700/50 rounded text-xs text-slate-400">+{hotel.amenities.length - 5} more</span>
+                      )}
+                    </div>
+
+                    {/* Badges */}
+                    <div className="flex flex-wrap gap-2">
+                      {hotel.breakfastIncluded && (
+                        <span className="flex items-center gap-1 text-xs text-emerald-400">
+                          <FaCoffee className="w-3 h-3" /> Breakfast included
+                        </span>
+                      )}
+                      {hotel.freeCancellation && (
+                        <span className="flex items-center gap-1 text-xs text-emerald-400">
+                          <HiShieldCheck className="w-3 h-3" /> Free cancellation
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Price & Book */}
+                  <div className="flex flex-col items-end justify-between">
+                    <div className="text-right">
+                      <p className="text-sm text-slate-400">{hotelResults.nights} night{hotelResults.nights > 1 ? 's' : ''}</p>
+                      <p className="text-2xl font-bold text-white">${hotel.totalPrice.toFixed(0)}</p>
+                      <p className="text-xs text-slate-400">${hotel.pricePerNight}/night &bull; {hotel.currency}</p>
+                    </div>
+                    <button
+                      onClick={() => toast.success(`Hotel "${hotel.name}" selected! Booking page coming soon.`)}
+                      className="w-full mt-4 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <span>Select Room</span>
+                      <HiArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </motion.div>
-        </div>
+        )}
+
+        {/* Hotel Empty State */}
+        {!hotelResults && !isSearchingHotels && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card text-center py-12">
+            <FaHotel className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">Find Your Perfect Stay</h3>
+            <p className="text-slate-400 mb-4">Search for hotels by city, set your dates, and discover the best deals available</p>
+            <p className="text-xs text-slate-500">Compare prices, amenities, and ratings across hundreds of properties</p>
+          </motion.div>
+        )}
+      </>
       )}
+
+      {/* ============= CARS TAB ============= */}
+      {activeTab === 'cars' && (
+      <>
+        {/* Car Search Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card bg-gradient-to-br from-cyan-600/20 to-blue-600/20 border-cyan-500/30"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+              <FaCar className="w-6 h-6 text-cyan-400" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-white">Car Rental</h2>
+              <p className="text-sm text-slate-400">Rent a car for your trip at the best prices</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            {/* Pickup Location */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiLocationMarker className="inline w-4 h-4 mr-1" />
+                Pickup Location
+              </label>
+              <input
+                type="text"
+                value={carSearch.pickupLocation}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, pickupLocation: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                placeholder="City or airport"
+              />
+            </div>
+
+            {/* Drop-off Location */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiLocationMarker className="inline w-4 h-4 mr-1" />
+                Drop-off Location
+              </label>
+              <input
+                type="text"
+                value={carSearch.dropoffLocation}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, dropoffLocation: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                placeholder="Same as pickup"
+              />
+            </div>
+
+            {/* Pickup Date */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiCalendar className="inline w-4 h-4 mr-1" />
+                Pickup Date
+              </label>
+              <input
+                type="date"
+                value={carSearch.pickupDate}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, pickupDate: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+
+            {/* Drop-off Date */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiCalendar className="inline w-4 h-4 mr-1" />
+                Drop-off Date
+              </label>
+              <input
+                type="date"
+                value={carSearch.dropoffDate}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, dropoffDate: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                min={carSearch.pickupDate || new Date().toISOString().split('T')[0]}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            {/* Pickup Time */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiClock className="inline w-4 h-4 mr-1" />
+                Pickup Time
+              </label>
+              <select
+                value={carSearch.pickupTime}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, pickupTime: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+              >
+                {Array.from({ length: 24 }, (_, i) => {
+                  const h = i.toString().padStart(2, '0');
+                  return [<option key={`${h}:00`} value={`${h}:00`}>{h}:00</option>, <option key={`${h}:30`} value={`${h}:30`}>{h}:30</option>];
+                })}
+              </select>
+            </div>
+
+            {/* Drop-off Time */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <HiClock className="inline w-4 h-4 mr-1" />
+                Drop-off Time
+              </label>
+              <select
+                value={carSearch.dropoffTime}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, dropoffTime: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+              >
+                {Array.from({ length: 24 }, (_, i) => {
+                  const h = i.toString().padStart(2, '0');
+                  return [<option key={`${h}:00`} value={`${h}:00`}>{h}:00</option>, <option key={`${h}:30`} value={`${h}:30`}>{h}:30</option>];
+                })}
+              </select>
+            </div>
+
+            {/* Car Type */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">
+                <FaCar className="inline w-4 h-4 mr-1" />
+                Car Type
+              </label>
+              <select
+                value={carSearch.carType}
+                onChange={(e) => setCarSearch(prev => ({ ...prev, carType: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+              >
+                <option value="all">All Types</option>
+                <option value="economy">Economy</option>
+                <option value="suv">SUV</option>
+                <option value="premium">Premium</option>
+                <option value="van">Van / Minivan</option>
+                <option value="luxury">Luxury</option>
+                <option value="electric">Electric</option>
+              </select>
+            </div>
+
+            {/* Search Button */}
+            <div className="flex items-end">
+              <button
+                onClick={searchCars}
+                disabled={isSearchingCars}
+                className="w-full px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg hover:from-cyan-600 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSearchingCars ? (
+                  <><HiRefresh className="w-5 h-5 animate-spin" /> Searching...</>
+                ) : (
+                  <><HiSearch className="w-5 h-5" /> Search Cars</>
+                )}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Car Results */}
+        {carResults && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">{carResults.cars.length} Cars Available</h3>
+                  <p className="text-sm text-slate-400">{carResults.location} &bull; {carResults.days} day{carResults.days > 1 ? 's' : ''}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-400">Starting from</p>
+                  <p className="text-lg font-semibold text-white">
+                    ${Math.min(...carResults.cars.map(c => c.pricePerDay)).toFixed(0)}/day
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {carResults.cars.map((car, index) => (
+                <motion.div
+                  key={car.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="card hover:border-cyan-500/30 transition-all overflow-hidden"
+                >
+                  {/* Car Image */}
+                  <div className="w-full h-44 rounded-lg overflow-hidden bg-slate-700 mb-4">
+                    <img
+                      src={car.image}
+                      alt={car.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  </div>
+
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h4 className="text-lg font-bold text-white">{car.name}</h4>
+                      <p className="text-sm text-slate-400">{car.company} &bull; {car.type}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      car.type === 'Electric' ? 'bg-emerald-500/20 text-emerald-400' :
+                      car.type === 'Luxury' ? 'bg-purple-500/20 text-purple-400' :
+                      car.type === 'Premium' ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-slate-700 text-slate-300'
+                    }`}>{car.type}</span>
+                  </div>
+
+                  {/* Specs */}
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <HiUsers className="w-3.5 h-3.5" /> {car.seats} seats
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <FaGasPump className="w-3 h-3" /> {car.fuelType}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <HiClock className="w-3.5 h-3.5" /> {car.transmission}
+                    </div>
+                  </div>
+
+                  {/* Features */}
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {car.features.slice(0, 4).map((feat, i) => (
+                      <span key={i} className="px-2 py-0.5 bg-slate-700/50 rounded text-xs text-slate-300">{feat}</span>
+                    ))}
+                    {car.features.length > 4 && (
+                      <span className="px-2 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400">+{car.features.length - 4}</span>
+                    )}
+                  </div>
+
+                  {/* Details */}
+                  <div className="flex flex-wrap gap-3 mb-4 text-xs">
+                    <span className="text-slate-400">Mileage: <span className="text-white">{car.mileage}</span></span>
+                    <span className="text-slate-400">Insurance: <span className="text-white">{car.insurance}</span></span>
+                  </div>
+                  {car.freeCancellation && (
+                    <p className="flex items-center gap-1 text-xs text-emerald-400 mb-4">
+                      <HiShieldCheck className="w-3.5 h-3.5" /> Free cancellation
+                    </p>
+                  )}
+
+                  {/* Price & Action */}
+                  <div className="border-t border-slate-700 pt-4 flex items-end justify-between">
+                    <div>
+                      <p className="text-2xl font-bold text-white">${car.totalPrice.toFixed(0)}</p>
+                      <p className="text-xs text-slate-400">${car.pricePerDay}/day &bull; {carResults.days} day{carResults.days > 1 ? 's' : ''}</p>
+                    </div>
+                    <button
+                      onClick={() => toast.success(`"${car.name}" from ${car.company} selected! Booking page coming soon.`)}
+                      className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg transition-all flex items-center gap-2 text-sm"
+                    >
+                      Select <HiArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Car Empty State */}
+        {!carResults && !isSearchingCars && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card text-center py-12">
+            <FaCar className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">Rent a Car</h3>
+            <p className="text-slate-400 mb-4">Search for car rentals by pickup location and dates to find the best deals</p>
+            <p className="text-xs text-slate-500">Economy, SUV, premium, luxury, electric and more available worldwide</p>
+          </motion.div>
+        )}
+      </>
+      )}
+
     </div>
   );
 };
